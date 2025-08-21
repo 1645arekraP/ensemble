@@ -1,5 +1,7 @@
-import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils";
+import { useAuth } from '@/context/auth-context';
+import { useRouter } from 'next/navigation';
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -47,6 +49,8 @@ const formSchema = z.object({
   ...props
 }: React.ComponentProps<"div">) {
     const [submissionMessage, setSubmissionMessage] = useState({status: '', text: ''});
+    const router = useRouter();
+    const { login } = useAuth();
     const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -56,16 +60,55 @@ const formSchema = z.object({
     },
     });
 
-    //TODO: Add logic to connect to backend
-    function onSubmit(values: z.infer<typeof formSchema>) {
-        console.log(values)
-        setSubmissionMessage({
-            status: 'success',
-            text: 'Sign Up Successful!',
-        });
-        // Reset the form after successful submission.
-        form.reset();
+
+  async function onSubmit(values: z.infer<typeof formSchema>) {
+    const backendUrl = "http://127.0.0.1:8000/api/auth/signup/";
+
+    // Payload for the request.
+    const payload = {
+      email: values.email,
+      password: values.password,
     };
+
+    try {
+      const response = await fetch(backendUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        console.log("Registration successful!", data);
+        setSubmissionMessage({
+          status: "success",
+          text: "Sign Up Successful! Redirecting to login...",
+        });
+        
+        // TODO: Maybe make it more secure
+        login(data.access_token, data.refresh_token);
+        
+      } else {
+        console.error("Registration failed:", data);
+        const errorText = data.email ? data.email[0] : (data.detail || 'An error occurred.');
+        setSubmissionMessage({
+          status: "error",
+          text: `Registration failed: ${errorText}`,
+        });
+      }
+    } catch (error) {
+      console.error("Network error:", error);
+      setSubmissionMessage({
+        status: "error",
+        text: "A network error occurred. Please check your connection.",
+      });
+    }
+
+    form.reset();
+  };
   
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
