@@ -28,15 +28,23 @@ class Project(BaseModel):
         return self.name
 
 class Tool(BaseModel):
-    """
-    Defines a tool that an agent can use. The actual Python function is implemented
-    separately in your agent logic.
-    """
-    name = models.CharField(max_length=100, unique=True, help_text="The function name for the tool.")
-    description = models.TextField(help_text="Description for the LLM to understand the tool's purpose.")
+    """Defines a tool that an agent can use, supporting both built-in and external API tools."""
+    class ToolType(models.TextChoices):
+        BUILT_IN = 'BUILT_IN', 'Built-in Tool'
+        API = 'API', 'API Tool'
+
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField()
+    tool_type = models.CharField(max_length=20, choices=ToolType.choices, default=ToolType.BUILT_IN)
+    
+    # For BUILT_IN tools: stores the Python import path
+    path = models.CharField(max_length=255, blank=True, null=True, help_text="Import path for Built-in tools'")
+    
+    # For API tools: stores the endpoint configuration
+    api_config = models.JSONField(default=dict, blank=True, help_text="Configuration for API tools (URL, method, headers, etc.)")
 
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.get_tool_type_display()})"
 
 class Agent(BaseModel):
     """Represents a single, configurable agent node within a project."""
@@ -46,7 +54,6 @@ class Agent(BaseModel):
         OPENAI = 'openai', 'OpenAI'
         ANTHROPIC = 'anthropic', 'Anthropic'
         GOOGLE = 'google', 'Google'
-        CUSTOM = 'custom', 'Custom'
 
     class AgentRole(models.TextChoices):
         GENERAL = 'general', 'General'

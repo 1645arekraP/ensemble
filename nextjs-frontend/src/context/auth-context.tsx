@@ -3,34 +3,46 @@
 import { createContext, useState, useEffect, useContext, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 
-// 1. Create the context
+// Create the context
 interface AuthContextType {
     isLoggedIn: boolean;
+    isPageLoading: boolean;
     login: (accessToken: string, refreshToken: string) => void;
     logout: () => void;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// 2. Create the provider component
+// Create the provider component
 interface AuthProviderProps {
     children: ReactNode;
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
     const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [isPageLoading, setIsLoading] = useState(true);
     const router = useRouter();
 
     // Check for tokens on initial load
     useEffect(() => {
-        const accessToken = localStorage.getItem("access_token");
-        const refreshToken = localStorage.getItem("refresh_token");
-        if (accessToken && refreshToken) {
-            setIsLoggedIn(true);
+        try {
+            const accessToken = localStorage.getItem("access_token");
+            const refreshToken = localStorage.getItem("refresh_token");
+            if (accessToken && refreshToken) {
+                setIsLoggedIn(true);
+            }
+        } catch (error) {
+            console.error("Could not access localStorage:", error);
+            // Handle cases where localStorage is not available
+            setIsLoggedIn(false);
+        } finally {
+            // Set loading to false after the check is complete
+            setIsLoading(false);
         }
+        
     }, []);
 
-    // 3. Define login/logout functions
+    // Define login/logout functions
     const login = (accessToken: string, refreshToken: string) => {
         localStorage.setItem("access_token", accessToken);
         localStorage.setItem("refresh_token", refreshToken);
@@ -46,13 +58,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
 
     return (
-        <AuthContext.Provider value={{ isLoggedIn, login, logout }}>
+        <AuthContext.Provider value={{ isLoggedIn, isPageLoading, login, logout }}>
             {children}
         </AuthContext.Provider>
     );
 }
 
-// 4. Create a custom hook for easy access
+//  Create a custom hook for easy access
 export const useAuth = () => {
     const context = useContext(AuthContext);
     if (context === undefined) {
