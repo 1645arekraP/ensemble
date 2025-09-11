@@ -48,6 +48,10 @@ INSTALLED_APPS = [
     # Local apps
     'apps.core',
     'apps.users',
+    'apps.graph',
+    'apps.agents',
+    'apps.tools',
+    'apps.executions',
 ]
 
 MIDDLEWARE = [
@@ -141,6 +145,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Custom user model
 AUTH_USER_MODEL = 'users.User'
+
+# OpenAI settings
+OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
 
 # Rest Framework settings
 REST_FRAMEWORK = {
