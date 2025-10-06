@@ -3,7 +3,6 @@
 import { createContext, useState, useEffect, useContext, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 
-// Create the context
 interface AuthContextType {
     isLoggedIn: boolean;
     isPageLoading: boolean;
@@ -13,7 +12,6 @@ interface AuthContextType {
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Create the provider component
 interface AuthProviderProps {
     children: ReactNode;
 }
@@ -23,7 +21,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const [isPageLoading, setIsLoading] = useState(true);
     const router = useRouter();
 
-    // Check for tokens on initial load
+    
     useEffect(() => {
         try {
             const accessToken = localStorage.getItem("access_token");
@@ -42,7 +40,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         
     }, []);
 
-    // Define login/logout functions
+    
     const login = (accessToken: string, refreshToken: string) => {
         localStorage.setItem("access_token", accessToken);
         localStorage.setItem("refresh_token", refreshToken);
@@ -64,7 +62,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     );
 }
 
-//  Create a custom hook for easy access
 export const useAuth = () => {
     const context = useContext(AuthContext);
     if (context === undefined) {

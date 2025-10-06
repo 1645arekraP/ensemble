@@ -38,7 +38,6 @@ export default function ProjectsPage() {
                 }
 
                 try {
-                    // NOTE: Ensure this is your correct refresh endpoint
                     const refreshRes = await fetch('http://127.0.0.1:8000/api/token/refresh/', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -76,9 +75,8 @@ export default function ProjectsPage() {
         }
     }, [isLoggedIn, router]);
 
-    const apiUrl = 'http://127.0.0.1:8000/api/dashboard/projects/';
+    const apiUrl = 'http://127.0.0.1:8000/api/graphs/';
     
-    // FIXED: Changed memoizedFetcher to fetcher
     const { data: projects, error, isLoading, mutate } = useSWR<Project[]>(
         isLoggedIn ? apiUrl : null,
         fetcher
@@ -106,8 +104,6 @@ export default function ProjectsPage() {
             });
 
             if (!response.ok) {
-                // This won't automatically refresh the token. 
-                // A better approach would be to create a reusable `authedFetch` function.
                 throw new Error('Failed to create project.');
             }
 

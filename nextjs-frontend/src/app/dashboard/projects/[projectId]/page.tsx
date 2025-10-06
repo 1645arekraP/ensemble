@@ -83,7 +83,7 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
         return res.json();
     }, [logout]);
     
-    const apiUrl = `http://127.0.0.1:8000/api/dashboard/projects/${projectId}/`;
+    const apiUrl = `http://127.0.0.1:8000/api/graphs/${projectId}/`;
     const { data: project, error, isLoading } = useSWR<Project>(apiUrl, fetcher);
 
     useEffect(() => {
