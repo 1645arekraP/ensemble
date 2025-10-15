@@ -8,23 +8,28 @@ import {
   SidebarInset,
   SidebarProvider,
 } from "@/components/ui/sidebar"
+import DashboardAuthWrapper from "./dashboardAuthWrapper";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   // This layout will be applied to all pages inside the (app) group
   return (
-    <SidebarProvider
-        className="bg-transpa"
-      style={
-        {
-          "--sidebar-width": "calc(var(--spacing) * 72)",
-          "--header-height": "calc(var(--spacing) * 12)",
-        } as React.CSSProperties
-      }
-    >
-      <AppSidebar variant="inset" />
-      <SidebarInset>
-        {children}
-      </SidebarInset>
-    </SidebarProvider>
+    <DashboardAuthWrapper>
+
+    
+      <SidebarProvider
+          className="bg-transpa"
+        style={
+          {
+            "--sidebar-width": "calc(var(--spacing) * 72)",
+            "--header-height": "calc(var(--spacing) * 12)",
+          } as React.CSSProperties
+        }
+      >
+        <AppSidebar variant="inset" />
+        <SidebarInset>
+          {children}
+        </SidebarInset>
+      </SidebarProvider>
+    </DashboardAuthWrapper>
   );
 }

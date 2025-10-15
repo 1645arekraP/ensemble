@@ -7,4 +7,5 @@ urlpatterns = [
     path('auth/', include('apps.users.urls.auth')), # Not CRUD opertions. Only POST to these endpoints so no need for a router.
     path('', include(router.urls)),
     path('graphs/', include('apps.graph.urls')),
+    path('users/', include('apps.users.urls.users')),
 ]
