@@ -128,3 +128,68 @@ export const updateProjectGraph = async ({ projectId, graphData }: { projectId: 
   }
   return response.json();
 };
+
+
+export interface NewAgentNodePayload {
+  project: number | string; // Project ID
+  name: string;
+  description: string;
+  system_instruction_prompt: string;
+  role: string; 
+  provider: string; 
+  model: string;
+  tools: number[]; // Array of Tool node primary keys
+  metadata: {
+    position: { x: number; y: number };
+  };
+}
+
+
+export interface ApiAgentNode {
+  id: number; // The database primary key
+  name: string;
+  description: string;
+  system_instruction_prompt: string;
+  role: AgentRole;
+  provider: AgentProvider;
+  model: string;
+  tools: number[]; // Array of Tool node primary keys
+  metadata: {
+    position: { x: number; y: number };
+  };
+}
+
+// We'll also need one for Tools
+export interface ApiToolNode {
+  id: number; // The database primary key
+  name: string;
+  description: string;
+  tool_type: ToolType;
+  metadata: {
+    position: { x: number; y: number };
+  };
+}
+
+export type ApiNode = 
+  | ({ type: 'agent' } & ApiAgentNode) 
+  | ({ type: 'tool' } & ApiToolNode);
+
+
+/**
+ * Creates a new agent node on the backend.
+ */
+export const createAgentNode = async (payload: NewAgentNodePayload): Promise<ApiAgentNode> => {
+  const response = await apiClient('/api/agents/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ 
+      detail: 'Failed to create agent node.'
+    }));
+    throw new Error(errorData.detail);
+  }
+
+  return response.json();
+};

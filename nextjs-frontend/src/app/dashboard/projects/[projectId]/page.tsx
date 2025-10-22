@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { SiteHeader } from "@/components/site-header";
 import { type Project } from "@/lib/types";
-import { getProjectById, updateProjectGraph } from '@/lib/api';
+import { createAgentNode, getProjectById, updateProjectGraph } from '@/lib/api';
 
 import {
   Background,
@@ -22,6 +22,15 @@ import {
   Position,
   NodeProps,
 } from '@xyflow/react';
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogDescription,
+  DialogFooter,
+  DialogHeader, 
+  DialogTitle 
+} from '@/components/ui/dialog';
+
 import '@xyflow/react/dist/style.css';
 
 import { Button } from "@/components/ui/button";
@@ -44,24 +53,26 @@ enum AgentProvider { OPENAI = 'openai', ANTHROPIC = 'anthropic', GOOGLE = 'googl
 enum AgentRole { GENERAL = 'general', SUPERVISOR = 'supervisor' }
 enum ToolType { WEB_SEARCH = 'web_search', CUSTOM = 'custom' }
 
-interface AgentNodeData {
-  name: string;
-  role: AgentRole;
-  provider: AgentProvider;
-  model: string;
-  system_instruction_prompt: string;
-  tools: string[]; // An array of tool node IDs
-  updateNodeData: (nodeId: string, data: Partial<AgentNodeData>) => void;
-  deleteNode: (nodeId: string) => void;
-  allNodes: Node[]; // Pass all nodes to allow tool selection
-}
-
 interface ToolNodeData {
   name: string;
   description: string;
   tool_type: ToolType;
   updateNodeData: (nodeId: string, data: Partial<ToolNodeData>) => void;
   deleteNode: (nodeId: string) => void;
+}
+
+
+interface AgentNodeData {
+  name: string;
+  role: AgentRole;
+  provider: AgentProvider;
+  model: string;
+  system_instruction_prompt: string;
+  tools: string[]; 
+  updateNodeData: (nodeId: string, data: Partial<AgentNodeData>) => void;
+  deleteNode: (nodeId: string) => void;
+  allNodes: Node[];
+  description: string; 
 }
 
 
@@ -235,6 +246,245 @@ const ToolNode = memo(({ id, data }: NodeProps<ToolNodeData>) => {
 });
 ToolNode.displayName = 'ToolNode';
 
+interface AddAgentNodeDialogProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (formData: {
+    name: string;
+    description: string;
+    role: AgentRole;
+    provider: AgentProvider;
+    model: string;
+    system_instruction_prompt: string;
+  }) => void;
+}
+
+const AddAgentNodeDialog = ({ isOpen, onOpenChange, onSubmit }: AddAgentNodeDialogProps) => {
+  // Form state with default values
+  const [name, setName] = useState('New Agent');
+  const [description, setDescription] = useState('A new AI agent.');
+  const [role, setRole] = useState<AgentRole>(AgentRole.GENERAL);
+  const [provider, setProvider] = useState<AgentProvider>(AgentProvider.OPENAI);
+  const [model, setModel] = useState('gpt-4o');
+  const [systemPrompt, setSystemPrompt] = useState('You are a helpful AI assistant.');
+
+  const resetForm = () => {
+    setName('New Agent');
+    setDescription('A new AI agent.');
+    setRole(AgentRole.GENERAL);
+    setProvider(AgentProvider.OPENAI);
+    setModel('gpt-4o');
+    setSystemPrompt('You are a helpful AI assistant.');
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit({
+      name,
+      description,
+      role,
+      provider,
+      model,
+      system_instruction_prompt: systemPrompt,
+    });
+    onOpenChange(false); // Close dialog
+    resetForm(); // Reset for next time
+  };
+
+  const handleClose = (open: boolean) => {
+    onOpenChange(open);
+    if (!open) {
+      resetForm(); // Reset if canceled
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Add New Agent Node</DialogTitle>
+          <DialogDescription>
+            Configure the details for your new AI agent.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="agent-name" className="text-right">
+              Name
+            </Label>
+            <Input
+              id="agent-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="col-span-3"
+            />
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="agent-desc" className="text-right">
+              Description
+            </Label>
+            <Input
+              id="agent-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="col-span-3"
+            />
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="agent-role" className="text-right">
+              Role
+            </Label>
+            <Select value={role} onValueChange={(value: AgentRole) => setRole(value)}>
+              <SelectTrigger className="col-span-3"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.values(AgentRole).map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="agent-provider" className="text-right">
+              Provider
+            </Label>
+            <Select value={provider} onValueChange={(value: AgentProvider) => setProvider(value)}>
+              <SelectTrigger className="col-span-3"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.values(AgentProvider).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="agent-model" className="text-right">
+              Model
+            </Label>
+            <Input
+              id="agent-model"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="col-span-3"
+            />
+          </div>
+          <div className="grid grid-cols-4 items-start gap-4">
+            <Label htmlFor="agent-prompt" className="text-right pt-2">
+              System Prompt
+            </Label>
+            <Textarea
+              id="agent-prompt"
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              className="col-span-3"
+              rows={4}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => handleClose(false)}>
+              Cancel
+            </Button>
+            <Button type="submit">Create Agent</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+interface AddToolNodeDialogProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (formData: { name: string; description: string; tool_type: ToolType }) => void;
+}
+
+const AddToolNodeDialog = ({ isOpen, onOpenChange, onSubmit }: AddToolNodeDialogProps) => {
+  const [name, setName] = useState('New Tool');
+  const [description, setDescription] = useState('A tool for performing a specific action.');
+  const [toolType, setToolType] = useState<ToolType>(ToolType.CUSTOM);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit({
+      name,
+      description,
+      tool_type: toolType,
+    });
+    // Reset form and close dialog
+    onOpenChange(false);
+    setName('New Tool');
+    setDescription('A tool for performing a specific action.');
+    setToolType(ToolType.CUSTOM);
+  };
+
+  const handleClose = (open: boolean) => {
+    onOpenChange(open);
+    if (!open) {
+      // Reset form if canceled
+      setName('New Tool');
+      setDescription('A tool for performing a specific action.');
+      setToolType(ToolType.CUSTOM);
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Add New Tool Node</DialogTitle>
+          <DialogDescription>
+            Configure the details for your new tool. It will be added to the canvas.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit}>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="tool-name" className="text-right">
+                Name
+              </Label>
+              <Input
+                id="tool-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="tool-description" className="text-right">
+                Description
+              </Label>
+              <Textarea
+                id="tool-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="col-span-3"
+                placeholder="Describes what this tool does..."
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="tool-type" className="text-right">
+                Tool Type
+              </Label>
+              <Select value={toolType} onValueChange={(value: ToolType) => setToolType(value)}>
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="Select a type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.values(ToolType).map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => handleClose(false)}>
+              Cancel
+            </Button>
+            <Button type="submit">Create Tool</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+
+
+
 const nodeTypes = { agent: AgentNode, tool: ToolNode };
 
 
@@ -260,6 +510,9 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
 
   const [nodes, setNodes] = useState<Node<any, string | undefined>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  const [isAddToolDialogOpen, setIsAddToolDialogOpen] = useState(false);
+  const [isAddAgentDialogOpen, setIsAddAgentDialogOpen] = useState(false);
+
 
   // --- Data Fetching and Saving ---
   const { data: project, isLoading, error } = useQuery<Project, Error>({
@@ -289,6 +542,9 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
       // Here you could add a user-facing error message (e.g., a toast notification)
     },
   });
+
+  
+
 
   // --- Node State Management Callbacks ---
   const updateNodeData = useCallback((nodeId: string, newData: Partial<AgentNodeData | ToolNodeData>) => {
@@ -358,44 +614,103 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
   }, [nodeDependencies]);
 
 
+  const useCreateAgentNode = useMutation({
+    mutationFn: createAgentNode,
+    onSuccess: (newNodeFromApi) => {
+      // Transform the API response into a React Flow node
+      const newNodeForState = transformApiNodeToStateNode({
+        ...newNodeFromApi,
+        type: 'agent', // Add type for our helper
+      });
+      
+      // Add the new node to the local state
+      setNodes((nds) => [...nds, newNodeForState]);
+      
+      // Optional: Invalidate the project query to refetch,
+      // though adding to state manually gives a faster UI response.
+      // queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+    },
+    onError: (err) => {
+      console.error("Failed to create agent node:", err);
+      // Show a toast notification to the user
+    }
+  });
+  
   // --- UI Action Handlers ---
   const addAgentNode = () => {
-    const newNodeId = `agent_${Date.now()}`;
-    const newNode: Node<AgentNodeData> = {
-      id: newNodeId,
-      type: 'agent',
-      position: { x: Math.random() * 400, y: Math.random() * 400 },
-      data: {
-        name: 'New Agent',
-        role: AgentRole.GENERAL,
-        provider: AgentProvider.OPENAI,
-        model: 'gpt-4o',
-        system_instruction_prompt: 'You are a helpful AI assistant.',
-        tools: [],
-        updateNodeData,
-        deleteNode,
-        allNodes: [], // Will be populated by the useEffect
-      },
-    };
-    setNodes((nds) => [...nds, newNode]);
+    setIsAddAgentDialogOpen(true);
   };
+
+  const handleCreateAgentNode = (formData: {
+  name: string;
+  description: string;
+  role: AgentRole;
+  provider: AgentProvider;
+  model: string;
+  system_instruction_prompt: string;
+}) => {
+  const newPosition = { x: Math.random() * 400, y: Math.random() * 400 };
+
+  // Build the payload from the form data
+  const payload: NewAgentNodePayload = {
+    project: projectId,
+    name: formData.name,
+    description: formData.description,
+    role: formData.role,
+    provider: formData.provider,
+    model: formData.model,
+    system_instruction_prompt: formData.system_instruction_prompt,
+    tools: [], // New agents start with no tools
+    metadata: {
+      position: newPosition,
+    },
+  };
+
+  // Call the mutation you already have!
+  useCreateAgentNode.mutate(payload);
+};
+
   
   const addToolNode = () => {
+    setIsAddToolDialogOpen(true);
+  };
+
+  const handleCreateToolNode = (formData: { name: string, description: string, tool_type: ToolType }) => {
+    const newPosition = { x: Math.random() * 400, y: Math.random() * 400 };
+
+    // We still need a useCreateToolNode mutation, let's assume you'll
+    // create it just like useCreateAgentNode
+    const payload: NewToolNodePayload = { // You'll need to define this type
+      project: projectId,
+      name: formData.name,
+      description: formData.description,
+      tool_type: formData.tool_type,
+      metadata: {
+        position: newPosition,
+      },
+    };
+
+    // We'll re-use the old logic for now, but you should
+    // replace this with a `useCreateToolNode.mutate(payload)` call
+    // like you did for agents.
+
+    // --- TEMPORARY (Replace this) ---
     const newNodeId = `tool_${Date.now()}`;
     const newNode: Node<ToolNodeData> = {
       id: newNodeId,
       type: 'tool',
-      position: { x: Math.random() * 400, y: Math.random() * 400 },
+      position: newPosition,
       data: {
-        name: 'New Tool',
-        description: 'A tool for performing a specific action.',
-        tool_type: ToolType.CUSTOM,
+        name: formData.name,
+        description: formData.description,
+        tool_type: formData.tool_type,
         updateNodeData,
         deleteNode,
       },
     };
     setNodes((nds) => [...nds, newNode]);
   };
+
 
   const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), [setNodes]);
   const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), [setEdges]);
@@ -416,6 +731,16 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <SiteHeader name={`Canvas: ${project?.name || '...'}`} />
+      <AddToolNodeDialog
+        isOpen={isAddToolDialogOpen}
+        onOpenChange={setIsAddToolDialogOpen}
+        onSubmit={handleCreateToolNode}
+      />
+      <AddAgentNodeDialog
+        isOpen={isAddAgentDialogOpen}
+        onOpenChange={setIsAddAgentDialogOpen}
+        onSubmit={handleCreateAgentNode}
+      />
       <div className="flex flex-grow">
         <CanvasSidebar onAddAgentNode={addAgentNode} onAddToolNode={addToolNode} />
         <main className="flex-grow">
