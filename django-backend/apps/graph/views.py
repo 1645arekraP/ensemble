@@ -11,14 +11,22 @@ from .models import Graph
 from apps.users.serializers import UserSerializer
 
 class GraphSerializer(serializers.ModelSerializer):
-    """Serializer for the Project model."""
-    
+    """Serializer for the Graph model with visualization support."""
+
     owner = UserSerializer(read_only=True)
+    serialized_graph = serializers.SerializerMethodField()
 
     class Meta:
         model = Graph
-        fields = ['id', 'name', 'description', 'graph_data', 'owner']
+        fields = ['id', 'name', 'description', 'graph_data', 'serialized_graph', 'owner']
         read_only_fields = ['id', 'created_at']
+
+    def get_serialized_graph(self, obj):
+        """
+        Returns the serialized graph structure for frontend visualization.
+        This includes nodes (agents) and edges (connections).
+        """
+        return obj.get_serialized()
 
 class GraphViewSet(viewsets.ModelViewSet):
     """
