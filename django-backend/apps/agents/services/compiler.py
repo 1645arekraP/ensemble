@@ -1,6 +1,6 @@
 from typing import Dict, Any, List, Optional
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage, AIMessage
 from pydantic import BaseModel, Field
 import os
 import json
@@ -9,6 +9,7 @@ from datetime import datetime
 from django.conf import settings
 from ..models import Agent
 from .agent_state import AgentState
+from ...tools.registry import ToolRegistry
 
 class SupervisorPromptBuilder:
     """Builds the prompt for the supervisor agent based on the state of other agents."""
@@ -60,6 +61,7 @@ class AgentCompiler:
 
     def __init__(self):
         self.compiled_agents: Dict[str, Agent] = {}
+        self.tool_registry = ToolRegistry()
 
     def _create_llm_instance(self, agent: Agent):
         """Create an LLM instance based on the agent's provider and model."""
@@ -76,8 +78,8 @@ class AgentCompiler:
         
     def _load_agent_tools(self, agent: Agent):
         """Load and configure tools for the agent."""
-        # Placeholder for tool loading logic
-        return []
+        # Get the agent's tools and convert them to LangChain tools
+        return self.tool_registry.get_tools_for_agent(agent.tools.all())
     
     def compile_agent(self, agent: Agent, graph_context=None):
         """Compile an agent into an executable form."""
@@ -106,15 +108,74 @@ class AgentCompiler:
                     task_message = HumanMessage(content=f"Current Task Focus: {state.current_task}")
                     messages.append(task_message)
 
+            # Handle tool calling loop
             if tools:
+                print(f"DEBUG: Agent {agent.name} has {len(tools)} tools: {[t.name for t in tools]}")
                 llm_with_tools = llm.bind_tools(tools)
                 response = llm_with_tools.invoke(messages)
+                print(f"DEBUG: Response has tool_calls: {hasattr(response, 'tool_calls') and bool(response.tool_calls)}")
+                
+                # Tool calling loop - execute tools and get final response
+                all_messages = messages.copy()
+                while hasattr(response, 'tool_calls') and response.tool_calls:
+                    all_messages.append(response)
+                    
+                    # Execute each tool call
+                    tool_messages = []
+                    for tool_call in response.tool_calls:
+                        # Find the matching tool
+                        matching_tool = None
+                        for tool in tools:
+                            if tool.name == tool_call['name']:
+                                matching_tool = tool
+                                break
+                        
+                        if matching_tool:
+                            try:
+                                # Execute the tool using invoke method
+                                print(f"DEBUG: Executing tool {tool_call['name']} with args: {tool_call['args']}")
+                                tool_result = matching_tool.invoke(tool_call['args'])
+                                print(f"DEBUG: Tool result: {tool_result[:200] if len(str(tool_result)) > 200 else tool_result}")
+                                tool_messages.append(
+                                    ToolMessage(
+                                        content=str(tool_result),
+                                        tool_call_id=tool_call['id']
+                                    )
+                                )
+                            except Exception as e:
+                                print(f"DEBUG: Tool execution error: {str(e)}")
+                                import traceback
+                                traceback.print_exc()
+                                tool_messages.append(
+                                    ToolMessage(
+                                        content=f"Error executing tool: {str(e)}",
+                                        tool_call_id=tool_call['id']
+                                    )
+                                )
+                        else:
+                            print(f"DEBUG: Tool {tool_call['name']} not found in available tools")
+                            tool_messages.append(
+                                ToolMessage(
+                                    content=f"Tool {tool_call['name']} not found",
+                                    tool_call_id=tool_call['id']
+                                )
+                            )
+                    
+                    # Add tool results to messages
+                    all_messages.extend(tool_messages)
+                    
+                    # Get next response from LLM
+                    response = llm_with_tools.invoke(all_messages)
+                
+                # Use only the state messages + final response for state update
+                final_messages = state.messages + [response]
             else:
                 response = llm.invoke(messages)
+                final_messages = state.messages + [response]
 
             # Create a new state with updated values
             new_state = AgentState(
-                messages=state.messages + [response],
+                messages=final_messages,
                 current_task=state.current_task,
                 context=state.context.copy(),
                 next_agent=state.next_agent,

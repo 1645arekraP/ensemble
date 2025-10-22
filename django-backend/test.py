@@ -56,25 +56,10 @@ def create_demo_tools():
     search_tool, created = Tool.objects.get_or_create(
         name='web_search',
         defaults={
-            'description': 'Search the web for information',
-            'tool_type': 'web_search',
-            'function_schema': {
-                'type': 'function',
-                'function': {
-                    'name': 'web_search',
-                    'description': 'Search the web for information',
-                    'parameters': {
-                        'type': 'object',
-                        'properties': {
-                            'query': {
-                                'type': 'string',
-                                'description': 'Search query'
-                            }
-                        },
-                        'required': ['query']
-                    }
-                }
-            }
+            'description': 'Search the web for current information. Use this when you need to find recent facts, statistics, or information about any topic.',
+            'tool_type': Tool.ToolType.WEB_SEARCH,
+            'config': {},  # DuckDuckGo doesn't need API keys
+            'is_active': True
         }
     )
     
@@ -286,6 +271,76 @@ is_complete: [true/false]
     return simple_graph
 
 
+def test_tool_calling(user, search_tool):
+    """Create and test a simple agent with tool calling capability"""
+    print("\n🧪 Creating tool calling test graph...")
+    
+    # Create tool test graph
+    tool_graph, created = Graph.objects.get_or_create(
+        owner=user,
+        name="Tool Test Graph",
+        defaults={
+            'description': "Simple graph to test web search tool calling",
+            'graph_data': {
+                'supervisor': 'search_supervisor',
+                'routing_rules': {
+                    'searcher': 'searcher',
+                    'FINISH': 'END'
+                },
+                'max_iterations': 5
+            }
+        }
+    )
+    
+    if created:
+        # Create supervisor
+        Agent.objects.create(
+            project=tool_graph,
+            name='search_supervisor',
+            description='Supervises search tasks',
+            system_instruction_prompt='''You coordinate search tasks. You have a searcher agent with web search capabilities.
+
+Analyze the task and decide:
+- Route to "searcher" if web search is needed
+- Mark complete when search results have been provided
+
+<decision>
+next_agent: [searcher/FINISH]
+reason: [your reasoning]
+is_complete: [true/false]
+</decision>''',
+            role=Agent.AgentRole.SUPERVISOR,
+            provider=Agent.AgentProvider.OPENAI,
+            model='gpt-4o'
+        )
+        
+        # Create searcher with tool
+        searcher = Agent.objects.create(
+            project=tool_graph,
+            name='searcher',
+            description='Searches the web for information',
+            system_instruction_prompt='''You are a web search specialist. Use the web_search tool to find current information.
+
+When given a search task:
+1. Use the web_search tool to gather information
+2. Summarize the key findings clearly
+3. Provide relevant facts and sources
+
+Always use the tool for current information rather than relying on your training data.''',
+            role=Agent.AgentRole.GENERAL,
+            provider=Agent.AgentProvider.OPENAI,
+            model='gpt-4o'
+        )
+        searcher.tools.add(search_tool)
+        
+        print(f"  ✅ Created tool test graph: {tool_graph.name}")
+        print(f"  ✅ Searcher agent has web_search tool enabled")
+    else:
+        print(f"  📋 Using existing tool test graph")
+    
+    return tool_graph
+
+
 def run_test(graph, test_input, test_name="Test"):
     """Run a test with the given graph and input"""
     print(f"\n🚀 Running {test_name}...")
@@ -355,6 +410,18 @@ def main():
         # Setup
         user = create_demo_user()
         search_tool = create_demo_tools()
+        
+        # Test 0: Tool calling
+        print("\n" + "="*50)
+        print("TEST 0: Web Search Tool Calling")
+        print("="*50)
+        
+        tool_graph = test_tool_calling(user, search_tool)
+        run_test(
+            tool_graph,
+            "Give me a summary of Georgia Tech's 2025 football season and who they played including the dates / final scores.",
+            "Tool Calling Test"
+        )
         
         # Test 1: Simple graph
         print("\n" + "="*50)

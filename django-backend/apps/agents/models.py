@@ -15,7 +15,6 @@ class Agent(models.Model):
     class AgentRole(models.TextChoices):
         GENERAL = 'general', 'General'
         SUPERVISOR = 'supervisor', 'Supervisor'
-        # We can add more roles here
 
     # --- Core Fields ---
     project = models.ForeignKey(Graph, on_delete=models.CASCADE, related_name='agents')
@@ -43,4 +42,4 @@ class Agent(models.Model):
         unique_together = ('project', 'name')
 
     def __str__(self):
-        return f"{self.name} ({self.get_role_display()}) in '{self.project.name}'"
+        return f"{self.name} in '{self.project.name}'"
