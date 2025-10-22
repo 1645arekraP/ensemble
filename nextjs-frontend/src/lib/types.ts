@@ -1,4 +1,3 @@
-// This file will hold shared type definitions for your application.
 
 export type User = {
   id: number;

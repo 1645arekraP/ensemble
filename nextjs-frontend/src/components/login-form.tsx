@@ -1,179 +1,116 @@
-import { cn } from "@/lib/utils"
-import { useAuth } from '@/context/auth-context';
-import { useRouter } from 'next/navigation';
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+"use client";
 
+import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useState } from 'react';
-import { zodResolver } from "@hookform/resolvers/zod"
-import { useForm } from "react-hook-form"
-import { z } from "zod"
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form"
-const formSchema = z.object({
-    email: z.email({
-    message: "Please enter a valid email.",
-  }),
-  password: z.string().min(8, {
-    message: "Password must be at least 8 characters long.",
-  }),
-})
- 
- 
- 
- 
- export function LoginForm({
+
+import { useAuth } from "@/context/auth-context";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { loginUser } from "@/lib/api";
+import { useMutation, useQueryClient } from '@tanstack/react-query'; // Make sure to import useQueryClient
+
+
+
+export function LoginForm({
   className,
   ...props
 }: React.ComponentProps<"div">) {
-  const [submissionMessage, setSubmissionMessage] = useState({ status: '', text: '' });
   const router = useRouter();
-  const { login } = useAuth();
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      email: "",
-      password: "",
+  const queryClient = useQueryClient();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  
+  const { login } = useAuth(); 
+
+  const { mutate, isPending, error } = useMutation({
+    // mutationFn expects the function that returns a promise
+    mutationFn: () => loginUser(email, password),
+    onSuccess: () => {
+      console.log("Login successful! Invalidating user query to trigger redirect.");
+      
+      // This tells the AuthProvider to refetch the user, which will
+      // automatically trigger the redirect in your GuestAuthWrapper.
+      queryClient.invalidateQueries({ queryKey: ['currentUser'] });
+
+      // You can also push here as a fallback, ensuring the user gets redirected.
+      router.push('/dashboard');
     },
+    // The error object will be automatically populated on failure
   });
 
-  async function onSubmit(values: z.infer<typeof formSchema>) {
-    const backendUrl = "http://127.0.0.1:8000/api/auth/login/";
-
-    // Payload for the request.
-    const payload = {
-      email: values.email,
-      password: values.password,
-    };
-
-    try {
-      const response = await fetch(backendUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        console.log("Login successful!", data);
-        setSubmissionMessage({
-          status: "success",
-          text: "Login Successful! Redirecting to dashboard...",
-        });
-        
-        // TODO: Maybe make it more secure
-        login(data.access, data.refresh); 
-        
-      } else {
-        console.error("Login failed:", data);
-        const errorText = data.email ? data.email[0] : (data.detail || 'An error occurred.');
-        setSubmissionMessage({
-          status: "error",
-          text: `Login failed: ${errorText}`,
-        });
-      }
-    } catch (error) {
-      console.error("Network error:", error);
-      setSubmissionMessage({
-        status: "error",
-        text: "A network error occurred. Please check your connection.",
-      });
-    }
-
-    form.reset();
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) return; // Basic validation
+    mutate();
   };
+
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="p-6 py-8">
-        <CardHeader>
-          <CardTitle>Login to your account</CardTitle>
-          
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-
-            <form onSubmit={form.handleSubmit(onSubmit)}>
-                <div className="flex flex-col gap-6">
+      <Card className="overflow-hidden p-0">
+        <CardContent className="grid p-0 md:grid-cols-2">
+          <form onSubmit={handleSubmit} className="p-6 md:p-8">
+            <div className="flex flex-col gap-6">
+              <div className="flex flex-col items-center text-center">
+                <h1 className="text-2xl font-bold">Welcome back</h1>
+                <p className="text-muted-foreground text-balance">
+                  Login to your Adniri account
+                </p>
+              </div>
               <div className="grid gap-3">
-                <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="email"
-                        placeholder="your@email.com"
-                        className="rounded-lg"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={isPending}
+                />
               </div>
-              <FormField
-                control={form.control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem className="grid gap-3">
-                    <div className="flex items-center">
-                      <FormLabel>Password</FormLabel>
-                      <a
-                        href="#"
-                        className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
-                      >
-                        Forgot your password?
-                      </a>
-                    </div>
-                    <FormControl>
-                      <Input
-                        type="password"
-                        placeholder="********"
-                        className="rounded-lg"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <div className="flex flex-col gap-3">
-                <Button type="submit" className="w-full hover:cursor-pointer">
-                  Login
-                </Button>
-              </div>
-            </div>
-                <div className="mt-4 text-center text-sm">
-                    Don&apos;t have an account?{" "}
-                    <a href="/register" className="underline underline-offset-4">
-                        Register
-                    </a>
+              <div className="grid gap-3">
+                <div className="flex items-center">
+                  <Label htmlFor="password">Password</Label>
+                  <a
+                    href="#"
+                    className="ml-auto text-sm underline-offset-2 hover:underline"
+                  >
+                    Forgot your password?
+                  </a>
                 </div>
-            </form>
-        </Form>
+                <Input id="password" type="password" required  value={password} onChange={(e) => setPassword(e.target.value)}/>
+              </div>
+              <Button type="submit" className="w-full">
+                Login
+              </Button>
+              {/*
+              <div className="text-center text-sm">
+                Don&apos;t have an account?{" "}
+                <a href="#" className="underline underline-offset-4">
+                  Sign up
+                </a>
+              </div>
+              */}
+            </div>
+          </form>
+          <div className="bg-muted relative hidden md:block">
+            <img
+              src="/placeholder.svg"
+              alt="Image"
+              className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
+            />
+          </div>
         </CardContent>
       </Card>
+      <div className="text-muted-foreground *:[a]:hover:text-primary text-center text-xs text-balance *:[a]:underline *:[a]:underline-offset-4">
+        By clicking continue, you agree to our <a href="#">Terms of Service</a>{" "}
+        and <a href="#">Privacy Policy</a>.
+      </div>
     </div>
   )
 }
