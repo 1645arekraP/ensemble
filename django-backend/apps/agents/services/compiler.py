@@ -1,5 +1,6 @@
 from typing import Dict, Any, List, Optional
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage, AIMessage
 from pydantic import BaseModel, Field
 import os
@@ -22,38 +23,67 @@ class SupervisorPromptBuilder:
             agent_descriptions.append(f"- {agent.name}: {agent.description}")
             agent_names.append(agent.name)
         agent_list = "\n".join(agent_descriptions)
+        agent_names_str = ", ".join(agent_names)
+        
         supervisor_prompt = f"""
-            {agent.system_instruction_prompt}
-            You are a supervisor agent responsible for coordinating and routing tasks between multiple specialized agents.
+You are a supervisor agent coordinating tasks between specialized agents. 
+**CRITICAL: Your *entire* response MUST end with a <decision> block.** No text should follow it.
 
-            Available Agents:
-            {agent_list}
+{agent.system_instruction_prompt} 
 
-            Your Responsibilities:
-            1. Analyze incoming tasks and determine the most appropriate agent to handle them
-            2. Break down complex tasks into subtasks if needed
-            3. Monitor progress and decide when tasks are complete
-            4. Coordinate between agents to ensure efficient workflow
+Available Agents (You MUST choose EXACTLY one of these names or use FINISH):
+{agent_list if agent_list else '- None'}
 
-            Decision Format:
-            Always end your response with a decision block in this format:
+**IMPORTANT**: When routing, use the EXACT agent name from this list: {agent_names_str}
 
-            <decision>
-            next_agent: [agent_name]
-            reason: [brief explanation of why this agent is chosen]
-            is_complete: [true/false - whether the overall task is finished]
-            </decision>
+Your Responsibilities:
+1. Analyze the user's request
+2. Choose the SINGLE BEST agent to handle it from the list above
+3. If the user's request has been fully satisfied, use FINISH
+4. **DO NOT** make up agent names - only use: {agent_names_str}
 
-            Available agent options: {', '.join(agent_names)}
-            Use "FINISH" as next_agent when the task is completely done.
+Decision Format (REQUIRED AT THE VERY END):
+You MUST end your response with exactly this format:
 
-            Guidelines:
-            - Consider each agent's specialization when routing
-            - Provide clear reasoning for your decisions
-            - Monitor the overall progress toward task completion
-            - If an agent's output is insufficient, you can route back to them or to another agent
-            - Always include the decision block - this is critical for routing
-            """
+<decision>
+next_agent: [exact_agent_name | FINISH]
+is_complete: [true | false]
+reasoning: [brief explanation]
+</decision>
+
+Examples:
+
+For a request like "write me a poem":
+<decision>
+next_agent: Poet
+is_complete: false
+reasoning: User wants a poem, routing to Poet agent
+</decision>
+
+For a request like "tell me a joke":
+<decision>
+next_agent: Joker
+is_complete: false
+reasoning: User wants a joke, routing to Joker agent
+</decision>
+
+After an agent completes its task successfully:
+<decision>
+next_agent: FINISH
+is_complete: true
+reasoning: The agent has completed the user's request
+</decision>
+
+**CRITICAL**: 
+- Always include the <decision> block at the very end
+- Use exact agent names: {agent_names_str}
+- After ONE agent successfully completes a task, use FINISH unless the user asks for more
+"""
+        print("\n" + "="*80)
+        print("SUPERVISOR PROMPT BUILT")
+        print("="*80)
+        print(f"Available agents: {agent_names_str}")
+        print("="*80 + "\n")
         return supervisor_prompt
     
 class AgentCompiler:
@@ -66,19 +96,26 @@ class AgentCompiler:
     def _create_llm_instance(self, agent: Agent):
         """Create an LLM instance based on the agent's provider and model."""
         if agent.provider == Agent.AgentProvider.OPENAI:
-            # Try agent-specific key first, then fall back to global settings
             api_key = agent.api_key or settings.OPENAI_API_KEY
-            
             if not api_key:
-                raise ValueError("OpenAI API key is required. Set it in the agent configuration or in settings.OPENAI_API_KEY")
-                
+                raise ValueError("OpenAI API key is required.")
             return ChatOpenAI(model=agent.model, api_key=api_key, temperature=0)
+        
+        elif agent.provider == 'google':
+            api_key = agent.api_key or settings.GOOGLE_API_KEY
+            if not api_key:
+                raise ValueError("Google API key is required.")
+            return ChatGoogleGenerativeAI(
+                model=agent.model,
+                api_key=api_key,
+                temperature=0,
+                convert_system_message_to_human=True
+            )
         else:
             raise NotImplementedError(f"Provider {agent.provider} is not supported yet.")
         
     def _load_agent_tools(self, agent: Agent):
         """Load and configure tools for the agent."""
-        # Get the agent's tools and convert them to LangChain tools
         return self.tool_registry.get_tools_for_agent(agent.tools.all())
     
     def compile_agent(self, agent: Agent, graph_context=None):
@@ -90,15 +127,57 @@ class AgentCompiler:
         tools = self._load_agent_tools(agent)
 
         def agent_node(state: AgentState) -> AgentState:
+            # SAFETY: Prevent infinite loops
+            execution_count = state.context.get('execution_count', 0)
+            
+            print("\n" + "█"*80)
+            print(f"█ AGENT EXECUTION #{execution_count + 1}")
+            print(f"█ Agent: {agent.name}")
+            print(f"█ Role: {agent.role}")
+            print(f"█ Current Task: {state.current_task}")
+            print(f"█ Is Complete: {state.is_complete}")
+            print(f"█ Next Agent (before): {state.next_agent}")
+            print("█"*80)
+            
+            if execution_count > 10:
+                print("\n" + "🛑"*40)
+                print("🛑 EMERGENCY STOP: Maximum execution count reached!")
+                print(f"🛑 Execution count: {execution_count}")
+                print(f"🛑 Last agent: {agent.name}")
+                print(f"🛑 Current task: {state.current_task}")
+                print(f"🛑 Agent outputs so far: {list(state.agent_outputs.keys())}")
+                print("🛑"*40 + "\n")
+                
+                return AgentState(
+                    messages=state.messages + [AIMessage(content="Maximum iterations reached. Stopping execution.")],
+                    current_task=state.current_task,
+                    context=state.context,
+                    next_agent="FINISH",
+                    is_complete=True,
+                    supervisor_feedback="Maximum iterations reached",
+                    task_queue=state.task_queue,
+                    completed_tasks=state.completed_tasks,
+                    agent_outputs=state.agent_outputs,
+                    supervisor_decision={'next_agent': 'FINISH', 'is_complete': True, 'reasoning': 'Max iterations'}
+                )
+            
+            # Build messages based on agent role
             if agent.role == Agent.AgentRole.SUPERVISOR and graph_context:
                 available_agents = graph_context.get('available_agents', [])
                 system_prompt = SupervisorPromptBuilder.build_supervisor_prompt(agent, available_agents)
 
                 context_info = self._build_supervisor_context(state)
+                
+                print("\n" + "📋"*40)
+                print("SUPERVISOR CONTEXT:")
+                print("📋"*40)
+                print(context_info)
+                print("📋"*40 + "\n")
+                
                 messages = [
                     SystemMessage(content=system_prompt),
                     HumanMessage(content=context_info)
-                ] + state.messages[-3:] # Keep last 3 messages for context
+                ] + state.messages[-3:]
             else:
                 messages = [
                     SystemMessage(content=agent.system_instruction_prompt)
@@ -108,22 +187,24 @@ class AgentCompiler:
                     task_message = HumanMessage(content=f"Current Task Focus: {state.current_task}")
                     messages.append(task_message)
 
+            print(f"\n🤖 Calling LLM for agent: {agent.name}...")
+            
             # Handle tool calling loop
             if tools:
-                print(f"DEBUG: Agent {agent.name} has {len(tools)} tools: {[t.name for t in tools]}")
+                print(f"   Tools available: {[t.name for t in tools]}")
                 llm_with_tools = llm.bind_tools(tools)
                 response = llm_with_tools.invoke(messages)
-                print(f"DEBUG: Response has tool_calls: {hasattr(response, 'tool_calls') and bool(response.tool_calls)}")
                 
-                # Tool calling loop - execute tools and get final response
                 all_messages = messages.copy()
+                tool_call_count = 0
                 while hasattr(response, 'tool_calls') and response.tool_calls:
+                    tool_call_count += 1
+                    print(f"\n   🔧 Tool call iteration #{tool_call_count}")
                     all_messages.append(response)
                     
-                    # Execute each tool call
                     tool_messages = []
                     for tool_call in response.tool_calls:
-                        # Find the matching tool
+                        print(f"      Executing: {tool_call['name']} with args: {tool_call['args']}")
                         matching_tool = None
                         for tool in tools:
                             if tool.name == tool_call['name']:
@@ -132,10 +213,8 @@ class AgentCompiler:
                         
                         if matching_tool:
                             try:
-                                # Execute the tool using invoke method
-                                print(f"DEBUG: Executing tool {tool_call['name']} with args: {tool_call['args']}")
                                 tool_result = matching_tool.invoke(tool_call['args'])
-                                print(f"DEBUG: Tool result: {tool_result[:200] if len(str(tool_result)) > 200 else tool_result}")
+                                print(f"      ✅ Result: {str(tool_result)[:100]}...")
                                 tool_messages.append(
                                     ToolMessage(
                                         content=str(tool_result),
@@ -143,9 +222,7 @@ class AgentCompiler:
                                     )
                                 )
                             except Exception as e:
-                                print(f"DEBUG: Tool execution error: {str(e)}")
-                                import traceback
-                                traceback.print_exc()
+                                print(f"      ❌ Error: {str(e)}")
                                 tool_messages.append(
                                     ToolMessage(
                                         content=f"Error executing tool: {str(e)}",
@@ -153,7 +230,7 @@ class AgentCompiler:
                                     )
                                 )
                         else:
-                            print(f"DEBUG: Tool {tool_call['name']} not found in available tools")
+                            print(f"      ❌ Tool not found: {tool_call['name']}")
                             tool_messages.append(
                                 ToolMessage(
                                     content=f"Tool {tool_call['name']} not found",
@@ -161,23 +238,29 @@ class AgentCompiler:
                                 )
                             )
                     
-                    # Add tool results to messages
                     all_messages.extend(tool_messages)
-                    
-                    # Get next response from LLM
                     response = llm_with_tools.invoke(all_messages)
                 
-                # Use only the state messages + final response for state update
                 final_messages = state.messages + [response]
             else:
                 response = llm.invoke(messages)
                 final_messages = state.messages + [response]
 
+            print("\n" + "💬"*40)
+            print(f"AGENT RESPONSE ({agent.name}):")
+            print("💬"*40)
+            print(response.content)
+            print("💬"*40 + "\n")
+
+            # Update execution count
+            new_context = state.context.copy()
+            new_context['execution_count'] = execution_count + 1
+
             # Create a new state with updated values
             new_state = AgentState(
                 messages=final_messages,
                 current_task=state.current_task,
-                context=state.context.copy(),
+                context=new_context,
                 next_agent=state.next_agent,
                 is_complete=state.is_complete,
                 supervisor_feedback=state.supervisor_feedback,
@@ -197,9 +280,24 @@ class AgentCompiler:
 
             if agent.role == Agent.AgentRole.SUPERVISOR:
                 new_state = self._handle_supervisor_logic(new_state, agent)
+                
+                print("\n" + "🎯"*40)
+                print("SUPERVISOR DECISION MADE:")
+                print("🎯"*40)
+                print(f"   Next Agent: {new_state.next_agent}")
+                print(f"   Is Complete: {new_state.is_complete}")
+                print(f"   Full Decision: {new_state.supervisor_decision}")
+                print("🎯"*40 + "\n")
             else:
                 if state.current_task and state.current_task not in new_state.completed_tasks:
                     new_state.completed_tasks.append(state.current_task)
+                    print(f"✅ Task completed: {state.current_task}")
+            
+            print("█"*80)
+            print(f"█ FINISHED: {agent.name}")
+            print(f"█ Next Agent (after): {new_state.next_agent}")
+            print(f"█ Is Complete (after): {new_state.is_complete}")
+            print("█"*80 + "\n")
             
             return new_state
         
@@ -209,27 +307,41 @@ class AgentCompiler:
     def _build_supervisor_context(self, state: AgentState) -> str:
         """Build context information for the supervisor agent."""
         context_parts = []
-        if state.current_task:
-            context_parts.append(f"Current Task: {state.current_task}")
-        if state.completed_tasks:
-            context_parts.append(f"Completed Tasks: {', '.join(state.completed_tasks)}")
-        if state.task_queue:
-            context_parts.append(f"Task Queue: {', '.join(state.task_queue)}")
-        if state.agent_outputs:
-            context_parts.append("Previous Agent Outputs:")
-            for agent_name, output in state.agent_outputs.items():
-                context_parts.append(f"- {agent_name} ({output['agent_role']}): {output['response'][:100]}...") # Truncate for brevity
-        if state.context:
-            context_parts.append(f"Additional Context: {json.dumps(state.context, indent=2)}")
         
-        return "\n\n".join(context_parts)
+        # Show the original user request
+        if state.current_task:
+            context_parts.append(f"**User Request**: {state.current_task}")
+        
+        # Show what's been done so far
+        if state.agent_outputs:
+            context_parts.append("\n**Work Completed So Far**:")
+            for agent_name, output in state.agent_outputs.items():
+                if output['agent_role'] != 'supervisor':
+                    context_parts.append(f"- {agent_name}: {output['response'][:150]}...")
+        
+        if state.completed_tasks:
+            context_parts.append(f"\nCompleted Tasks: {', '.join(state.completed_tasks)}")
+        
+        return "\n".join(context_parts)
     
     def _handle_supervisor_logic(self, state: AgentState, agent: Agent) -> AgentState:
         """Handle supervisor-specific routing logic"""
         response_content = state.messages[-1].content
         
-        # Parse supervisor decision using structured output
+        print("\n" + "🔍"*40)
+        print("PARSING SUPERVISOR DECISION")
+        print("🔍"*40)
+        print(f"Response length: {len(response_content)} chars")
+        print(f"Looking for <decision> block...")
+        
+        # Parse supervisor decision
         supervisor_decision = self._parse_supervisor_decision(response_content, agent)
+        
+        print(f"\n✅ Parsed decision:")
+        print(f"   - next_agent: {supervisor_decision.get('next_agent')}")
+        print(f"   - is_complete: {supervisor_decision.get('is_complete')}")
+        print(f"   - reasoning: {supervisor_decision.get('reasoning', 'N/A')}")
+        print("🔍"*40 + "\n")
         
         # Create a new state for immutability
         new_state = AgentState(
@@ -245,7 +357,6 @@ class AgentCompiler:
             supervisor_decision=supervisor_decision
         )
         
-        # Add to task queue if supervisor assigned new tasks
         if supervisor_decision.get('new_tasks'):
             new_state.task_queue.extend(supervisor_decision['new_tasks'])
         
@@ -254,20 +365,29 @@ class AgentCompiler:
     def _parse_supervisor_decision(self, response_content: str, agent: Agent) -> Dict[str, Any]:
         """Parse supervisor response to extract routing decisions"""
         # Look for decision block
-        decision_match = re.search(r'<decision>(.*?)</decision>', response_content, re.DOTALL)
+        decision_match = re.search(r'<decision>(.*?)</decision>', response_content, re.DOTALL | re.IGNORECASE)
         if decision_match:
+            print("   ✅ Found <decision> block")
             decision_text = decision_match.group(1)
-            return self._parse_decision_text(decision_text)
+            print(f"   Decision text: {decision_text}")
+            parsed = self._parse_decision_text(decision_text)
+            return parsed
+        else:
+            print("   ⚠️  No <decision> block found!")
         
         # Look for JSON decision block
         json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_content, re.DOTALL)
         if json_match:
+            print("   ✅ Found JSON block")
             try:
-                return json.loads(json_match.group(1))
-            except json.JSONDecodeError:
-                pass
+                parsed = json.loads(json_match.group(1))
+                print(f"   Parsed JSON: {parsed}")
+                return parsed
+            except json.JSONDecodeError as e:
+                print(f"   ❌ JSON parse error: {e}")
         
         # Fallback to keyword-based parsing
+        print("   ⚠️  Falling back to keyword parsing")
         return self._parse_keywords_decision(response_content, agent)
     
     def _parse_decision_text(self, decision_text: str) -> Dict[str, Any]:
@@ -275,24 +395,32 @@ class AgentCompiler:
         decision = {}
         
         # Extract next agent
-        next_agent_match = re.search(r'next_agent:\s*(\w+)', decision_text, re.IGNORECASE)
+        next_agent_match = re.search(r'next_agent:\s*(.+?)(?:\n|$)', decision_text, re.IGNORECASE)
         if next_agent_match:
-            decision['next_agent'] = next_agent_match.group(1)
+            decision['next_agent'] = next_agent_match.group(1).strip()
+            print(f"      Extracted next_agent: {decision['next_agent']}")
+        else:
+            print("      ⚠️  Could not extract next_agent")
         
         # Check for completion
         is_complete_match = re.search(r'is_complete:\s*(true|false)', decision_text, re.IGNORECASE)
         if is_complete_match:
             decision['is_complete'] = is_complete_match.group(1).lower() == 'true'
+            print(f"      Extracted is_complete: {decision['is_complete']}")
+        else:
+            print("      ⚠️  Could not extract is_complete")
         
         # Extract reasoning
-        reason_match = re.search(r'reason:\s*(.+?)(?:\n|$)', decision_text, re.IGNORECASE)
+        reason_match = re.search(r'reasoning:\s*(.+?)(?:\n|$)', decision_text, re.IGNORECASE | re.DOTALL)
         if reason_match:
             decision['reasoning'] = reason_match.group(1).strip()
+            print(f"      Extracted reasoning: {decision['reasoning'][:50]}...")
         
         return decision
     
     def _parse_keywords_decision(self, content: str, agent: Agent) -> Dict[str, Any]:
         """Fallback keyword-based decision parsing"""
+        print("   🔎 Using keyword-based parsing...")
         content_lower = content.lower()
         
         # Get available agents from the project
@@ -300,24 +428,25 @@ class AgentCompiler:
             id=agent.id
         ).values_list('name', flat=True))
         
+        print(f"   Available agents to check: {available_agents}")
+        
         # Look for agent names mentioned
         for agent_name in available_agents:
             if agent_name.lower() in content_lower:
+                print(f"   ✅ Found agent name '{agent_name}' in response")
                 return {
                     'next_agent': agent_name,
+                    'is_complete': False,
                     'reasoning': 'Keyword match in supervisor response'
                 }
         
         # Check for completion keywords
         completion_keywords = ['complete', 'finished', 'done', 'end', 'final']
-        if any(keyword in content_lower for keyword in completion_keywords):
-            return {'is_complete': True, 'reasoning': 'Completion keyword detected'}
+        found_keywords = [kw for kw in completion_keywords if kw in content_lower]
+        if found_keywords:
+            print(f"   ✅ Found completion keywords: {found_keywords}")
+            return {'next_agent': 'FINISH', 'is_complete': True, 'reasoning': 'Completion keyword detected'}
         
-        # Default: continue with first available agent
-        if available_agents:
-            return {
-                'next_agent': available_agents[0],
-                'reasoning': 'Default routing to first available agent'
-            }
-        
-        return {'is_complete': True, 'reasoning': 'No available agents found'}
+        # Default: FINISH to prevent loops
+        print("   ⚠️  No clear routing found, defaulting to FINISH")
+        return {'next_agent': 'FINISH', 'is_complete': True, 'reasoning': 'No clear routing found, defaulting to finish'}

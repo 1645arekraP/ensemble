@@ -9,4 +9,5 @@ urlpatterns = [
     path('graphs/', include('apps.graph.urls')),
     path('agents/', include('apps.agents.urls')),
     path('users/', include('apps.users.urls.users')),
+    path('executions/', include('apps.executions.urls'))
 ]

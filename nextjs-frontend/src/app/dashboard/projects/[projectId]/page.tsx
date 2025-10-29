@@ -28,7 +28,22 @@ import { AddAgentNodeDialog } from './components/AddAgentNodeDialog';
 import { AddToolNodeDialog } from './components/AddToolNodeDialog';
 import { CanvasSidebar } from './components/CanvasSidebar';
 import { useProjectGraph } from './hooks/useProjectGraph';
+import { Label } from '@/components/ui/label';
 
+type RunGraphResult = {
+  success: boolean;
+  execution_id: number | null;
+  final_state: any;
+  messages: string[];
+  context: any;
+  agent_outputs: {
+    [key: string]: {
+      response: string;
+      [key: string]: any;
+    };
+  };
+  error?: string;
+};
 // Define node types for React Flow
 const nodeTypes = { agent: AgentNode, tool: ToolNode };
 
@@ -43,7 +58,7 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
 
   const [reactFlowInstance, setReactFlowInstance] = useState<any | null>(null);
   const [graphInput, setGraphInput] = useState("");
-  const [graphOutput, setGraphOutput] = useState("");
+  const [graphOutput, setGraphOutput] = useState<RunGraphResult | { error: string } | null>(null);
 
   // --- Data Fetching ---
   const { data: project, isLoading, error } = useQuery<Project, Error>({
@@ -76,25 +91,42 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
   } = useProjectGraph(projectId, project);
 
   const handleSaveAndRun = () => {
-    // 1. Clear previous output
     setGraphOutput("");
 
-    // 2. Call saveProject, and in its onSuccess, call runGraph
+    // Call saveProject, and in its onSuccess, call runGraph
     handleSaveProject(undefined, {
       onSuccess: (savedProject) => {
-        // 3. Now that save is successful, call runGraph
+        // Now that save is successful, call runGraph
         toast.info("Project saved. Running graph...");
         runGraph(
           { projectId, input: graphInput },
           {
-            onSuccess: (runResult: RunGraphResult) => {
-              // 4. Set the result to the output box
-              setGraphOutput(JSON.stringify(runResult, null, 2));
-              toast.success("Graph run successful.");
+            // --- UPDATED: Robust parsing logic ---
+            onSuccess: (runResult: any) => { // Accept 'any' to be safe
+              let data: RunGraphResult | { error: string };
+              
+              if (typeof runResult === 'string') {
+                try {
+                  data = JSON.parse(runResult);
+                } catch (e) {
+                  console.error("Failed to parse graph output:", e);
+                  data = { error: "Failed to parse server response." };
+                }
+              } else {
+                data = runResult; // Assume it's already an object
+              }
+
+              setGraphOutput(data);
+              
+              if (!data.error) {
+                toast.success("Graph run successful.");
+              } else {
+                toast.error("Graph run failed.");
+              }
             },
             onError: (runError: Error) => {
-              // 5. Set the error to the output box
-              setGraphOutput(JSON.stringify({ error: runError.message }, null, 2));
+              // 5. Set the ERROR object to state
+              setGraphOutput({ error: runError.message });
               toast.error("Graph run failed.");
             }
           }
@@ -170,10 +202,10 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
   
   
   return (
+    
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <SiteHeader name={`Canvas: ${project?.name || '...'}`} />
       
-      {/* Dialogs are mounted at the top level */}
       <AddToolNodeDialog
         isOpen={isAddToolDialogOpen}
         onOpenChange={setIsAddToolDialogOpen}
@@ -185,14 +217,18 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
         onSubmit={handleCreateAgentNode}
       />
       
-      <div className="flex flex-grow">
+      {/* --- UPDATED: Flex layout --- */}
+      <div className="flex flex-grow overflow-hidden">
+        {/* Left Sidebar */}
         <CanvasSidebar 
           onAddAgentNode={() => setIsAddAgentDialogOpen(true)} 
           onAddToolNode={() => setIsAddToolDialogOpen(true)} 
           agents={agents || []} 
           onAgentDragStart={onAgentDragStart} 
         />
-        <main className="flex-grow">
+        
+        {/* Main Canvas */}
+        <main className="flex-grow h-full">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -205,46 +241,81 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
             onDragOver={onDragOver}       
             onDrop={onDrop}            
           >
-            <Panel position="top-right" className="flex flex-col gap-2 w-72">
-              {/* Input Textarea */}
-              <Textarea
-                placeholder="Enter input for the graph..."
-                value={graphInput}
-                onChange={(e) => setGraphInput(e.target.value)}
-                rows={3}
-              />
-              
-              {/* Buttons */}
-              <div className="flex gap-2">
-                <Button 
-                  onClick={() => handleSaveProject()} 
-                  disabled={isSaving || isExecuting} 
-                  variant="outline"
-                  className="flex-1"
-                >
-                  {isSaving ? 'Saving...' : 'Save'}
-                </Button>
-                <Button 
-                  onClick={handleSaveAndRun} 
-                  disabled={isSaving || isExecuting || !graphInput}
-                  className="flex-1"
-                >
-                  {isSaving ? 'Saving...' : isExecuting ? 'Running...' : 'Save & Run'}
-                </Button>
-              </div>
-
-              {/* Output Display */}
-              {graphOutput && (
-                <pre className="p-2 bg-muted text-xs rounded-md w-full max-h-48 overflow-auto shadow-inner">
-                  {graphOutput}
-                </pre>
-              )}
-            </Panel>
+            {/* --- REMOVED: Panel was here --- */}
+            
             <Controls />
             <MiniMap />
             <Background variant="dots" gap={12} size={1} />
           </ReactFlow>
         </main>
+        
+        {/* --- ADDED: Right Sidebar --- */}
+        <aside className="w-80 border-l bg-background p-4 flex flex-col gap-4 overflow-y-auto">
+          <h2 className="text-lg font-semibold">Controls & Output</h2>
+          
+          {/* Input */}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="graph-input">Input</Label>
+            <Textarea
+              id="graph-input"
+              placeholder="Enter input for the graph..."
+              value={graphInput}
+              onChange={(e) => setGraphInput(e.target.value)}
+              rows={3}
+            />
+          </div>
+
+          {/* Buttons */}
+          <div className="flex gap-2">
+            <Button 
+              onClick={() => handleSaveProject()} 
+              disabled={isSaving || isExecuting} 
+              variant="outline"
+              className="flex-1"
+            >
+              {isSaving ? 'Saving...' : 'Save'}
+            </Button>
+            <Button 
+              onClick={handleSaveAndRun} 
+              disabled={isSaving || isExecuting || !graphInput}
+              className="flex-1"
+            >
+              {isSaving ? 'Saving...' : isExecuting ? 'Running...' : 'Save & Run'}
+            </Button>
+          </div>
+
+          {/* Output */}
+          <div className="flex-grow overflow-auto">
+            <h3 className="text-md font-semibold mb-2">Execution Output</h3>
+            {/* --- UPDATED: Output rendering --- */}
+            {graphOutput ? (
+              // --- UPDATED: Removed h-full, added min-h-0 ---
+              <div className="p-2 bg-muted rounded-md w-full overflow-auto shadow-inner flex flex-col gap-2 min-h-0"> 
+                {/* Check for error first */ console.log(graphOutput.success)}
+                {graphOutput.error && (
+                  <div className="p-2 bg-red-100 text-red-700 rounded-md">
+                    <strong>Error:</strong> {graphOutput.error}
+                  </div>
+                )}
+                
+                {/* If no error, check for agent outputs */}
+                {graphOutput.agent_outputs && Object.entries(graphOutput.agent_outputs).map(([agentName, output]) => (
+                  <div key={agentName} className="p-2 border bg-card rounded-md">
+                    <strong className="text-sm text-primary">{agentName}</strong>
+                    <pre className="text-xs whitespace-pre-wrap font-sans mt-1">
+                      {/* Display the clean 'response' string */ console.log(output)}
+                      {output.response}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground italic h-full flex items-center justify-center p-4 bg-muted rounded-md">
+                Run the graph to see the output.
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   );
