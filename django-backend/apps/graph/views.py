@@ -34,7 +34,6 @@ class GraphViewSet(viewsets.ModelViewSet):
     """
     queryset = Graph.objects.all()
     serializer_class = GraphSerializer
-    # Ensure only authenticated users can access this endpoint.
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):

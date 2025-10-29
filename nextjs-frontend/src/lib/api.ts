@@ -145,6 +145,8 @@ export interface NewAgentNodePayload {
 }
 
 
+
+
 export interface ApiAgentNode {
   id: number; // The database primary key
   name: string;
@@ -189,6 +191,52 @@ export const createAgentNode = async (payload: NewAgentNodePayload): Promise<Api
       detail: 'Failed to create agent node.'
     }));
     throw new Error(errorData.detail);
+  }
+
+  return response.json();
+};
+
+/**
+ * Fetches all agents available to user
+ */
+export const getAgents = async (): Promise<ApiAgentNode[]> => {
+  const response = await apiClient(`/api/agents/`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch agents details.');
+  }
+  return response.json();
+};
+
+
+export interface RunGraphPayload {
+  projectId: string;
+  input: string;
+}
+
+export interface RunGraphResult {
+  result: any;
+  [key: string]: any; // To allow for other data like intermediate steps
+}
+
+/**
+ * Sends the graph execution request to the backend.
+ * This just triggers the run; it assumes the graph is already saved.
+ */
+export const runProjectGraph = async (payload: RunGraphPayload): Promise<RunGraphResult> => {
+  const { projectId, input } = payload;
+  
+  // This endpoint is consistent with your getProjectById and updateProjectGraph
+  // and matches the backend file structure (`apps/executions` or `apps/graph`)
+  const response = await apiClient(`/api/graphs/${projectId}/run/`, {
+    method: 'POST',
+    body: JSON.stringify({
+      input: input, // Send the user's input
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ message: 'Failed to run graph' }));
+    throw new Error(err.message || 'Failed to run graph. Check server logs.');
   }
 
   return response.json();
