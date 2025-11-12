@@ -14,6 +14,7 @@ class AgentState(BaseModel):
     """Shared state between agents in the graph"""
     messages: Annotated[List[BaseMessage], operator.add]
     current_task: str = ""
+    user: Optional[Any] = None
     context: Dict[str, Any] = Field(default_factory=dict)
     next_agent: Optional[str] = None
     is_complete: bool = False

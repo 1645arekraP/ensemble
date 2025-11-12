@@ -1,4 +1,3 @@
-// app/dashboard/projects/[projectId]/page.tsx
 "use client"
 
 import { use, useState, useRef, useCallback, useEffect } from 'react';
@@ -38,9 +37,9 @@ import ToolNode from './components/ToolNode';
 import { AddAgentNodeDialog } from './components/AddAgentNodeDialog';
 import { AddToolNodeDialog } from './components/AddToolNodeDialog';
 import { useProjectGraph } from './hooks/useProjectGraph';
-import { Toolbox } from './components/ToolBox';
-import { Canvas } from './components/Canvas';
-import { ControlPanel } from './components/ControlPanel';
+import { Toolbox } from './components/ToolBox'; // <-- Your new component
+import { Canvas } from './components/Canvas';   // <-- Your new component
+import { ControlPanel } from './components/ControlPanel'; // <-- Your new component
 
 // Define node types for React Flow
 const nodeTypes = { agent: AgentNode, tool: ToolNode };
@@ -102,16 +101,17 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
     setEdges,
     updateNodeData,
     deleteNode,
+    isCreatingAgent, // <-- 1. Get the loading state
+    isCreatingTool,  // <-- 1. Get the loading state
   } = useProjectGraph(projectId);
 
   // --- Mutation for graph generation (NLP-to-Workflow) ---
   const { mutate: generateGraph, isPending: isGenerating } = useMutation({
     mutationFn: generateGraphFromPrompt,
     onSuccess: (data: GraphGenerateResponse) => {
-      toast.success("Workflow Updated!", {
-        description: data.explanation,
-      });
+      toast.success("Workflow Updated!", { description: data.explanation });
       setChatHistory(prev => [...prev, { role: 'ai', content: data.explanation }]);
+      
       const nodesWithUpdaters = data.graph.nodes.map((node) => ({
         ...node,
         data: { 
@@ -123,6 +123,7 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
       }));
       setNodes(nodesWithUpdaters);
       setEdges(data.graph.edges);
+      
       if (reactFlowInstance) {
         reactFlowInstance.fitView();
       }
@@ -182,13 +183,13 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
   };
 
   const onAgentDragStart = useCallback((event: React.DragEvent, agent: ApiAgentNode) => {
-    const nodeData = { type: 'agent', data: agent }; // Pass full agent data
+    const nodeData = { type: 'agent', data: agent };
     event.dataTransfer.setData('application/reactflow', JSON.stringify(nodeData));
     event.dataTransfer.effectAllowed = 'move';
   }, []);
 
   const onToolDragStart = useCallback((event: React.DragEvent, tool: ApiToolNode) => {
-    const nodeData = { type: 'tool', data: tool }; // Pass full tool data
+    const nodeData = { type: 'tool', data: tool };
     event.dataTransfer.setData('application/reactflow', JSON.stringify(nodeData));
     event.dataTransfer.effectAllowed = 'move';
   }, []);
@@ -242,16 +243,18 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
     <div className="h-screen w-screen flex flex-col bg-neutral-50 overflow-hidden">
       <SiteHeader name={`Canvas: ${project?.name || '...'}`} />
 
-      {/* Dialogs */}
+      {/* --- 2. Pass the isPending prop to the dialogs --- */}
       <AddToolNodeDialog
         isOpen={isAddToolDialogOpen}
         onOpenChange={setIsAddToolDialogOpen}
         onSubmit={handleCreateToolNode}
+        isPending={isCreatingTool} 
       />
       <AddAgentNodeDialog
         isOpen={isAddAgentDialogOpen}
         onOpenChange={setIsAddAgentDialogOpen}
         onSubmit={handleCreateAgentNode}
+        isPending={isCreatingAgent}
       />
       
       {/* Main 3-Column Layout */}

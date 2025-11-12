@@ -194,7 +194,10 @@ export const useProjectGraph = (projectId: string) => {
   });
 
   
-  const createAgentNodeMutation = useMutation({
+  const { 
+    mutate: createAgentNodeMutation, 
+    isPending: isCreatingAgent
+  } = useMutation({
     mutationFn: createAgentNode,
     onSuccess: () => {
       toast.success("Agent created successfully!");
@@ -209,7 +212,10 @@ export const useProjectGraph = (projectId: string) => {
     }
   });
   
-  const createToolNodeMutation = useMutation({
+  const { 
+    mutate: createToolNodeMutation, 
+    isPending: isCreatingTool 
+  } = useMutation({
     mutationFn: createToolNode,
     onSuccess: () => {
       toast.success("Tool created successfully!");
@@ -284,5 +290,7 @@ export const useProjectGraph = (projectId: string) => {
     isExecuting,
     updateNodeData,
     deleteNode,
+    isCreatingAgent,
+    isCreatingTool,
   }
 }

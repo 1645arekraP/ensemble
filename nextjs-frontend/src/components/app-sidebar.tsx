@@ -50,6 +50,11 @@ const data = {
       url: "/dashboard/projects",
       icon: IconFolder,
     },
+    {
+      title: "Connections",
+      url: "/dashboard/connections",
+      icon: IconUsers,
+    },
   ],
   navClouds: [
     {

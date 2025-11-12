@@ -1,6 +1,8 @@
+// components/AddToolNodeDialog.tsx
+
 "use client"
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,30 +16,34 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from "@/components/ui/textarea";
-import { NewToolNodePayload } from '@/lib/types'; // Make sure this type is defined
+import { NewToolNodePayload, AddToolFormState } from '@/lib/types';
+import LoadingSpinner from '@/components/LoadingSpinner';
 
-// --- Create a TypeScript enum to match your Django model ---
+// This enum must match your backend 'ToolType' in models.py
 enum ToolType {
   WEB_SEARCH = 'web_search',
   DISCORD_WEBHOOK = 'discord_webhook',
   SLACK_WEBHOOK = 'slack_webhook',
   TEAMS_WEBHOOK = 'teams_webhook',
+  GMAIL = 'gmail',
 }
 
 interface AddToolNodeDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  // Use the payload type for the form data
-  onSubmit: (formData: NewToolNodePayload) => void; 
+  onSubmit: (formData: AddToolFormState) => void; 
+  isPending: boolean; // We'll pass this from the parent
 }
 
-export const AddToolNodeDialog = ({ isOpen, onOpenChange, onSubmit }: AddToolNodeDialogProps) => {
+export const AddToolNodeDialog = ({ 
+  isOpen, 
+  onOpenChange, 
+  onSubmit, 
+  isPending 
+}: AddToolNodeDialogProps) => {
   const [name, setName] = useState('New Tool');
   const [description, setDescription] = useState('A new tool for my library.');
   const [toolType, setToolType] = useState<ToolType>(ToolType.WEB_SEARCH);
-  
-  // --- Add state for the config ---
-  // This will store the webhook URL or API key
   const [config, setConfig] = useState('');
 
   const resetForm = () => {
@@ -50,11 +56,10 @@ export const AddToolNodeDialog = ({ isOpen, onOpenChange, onSubmit }: AddToolNod
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // --- Build the config JSON based on the tool type ---
-    let toolConfig = {};
-    if (toolType === ToolType.WEB_SEARCH) {
-      toolConfig = { "placeholder": "API key will be pulled from credentials" };
-    } else if (
+    let toolConfig: Record<string, any> = {};
+
+    // Only set config for webhook tools
+    if (
       toolType === ToolType.DISCORD_WEBHOOK ||
       toolType === ToolType.SLACK_WEBHOOK ||
       toolType === ToolType.TEAMS_WEBHOOK
@@ -62,76 +67,87 @@ export const AddToolNodeDialog = ({ isOpen, onOpenChange, onSubmit }: AddToolNod
       toolConfig = { "webhook_url": config };
     }
 
+    // Submit the form data
     onSubmit({
       name,
       description,
       tool_type: toolType,
       config: toolConfig,
     });
-    
-    onOpenChange(false);
-    resetForm();
   };
 
   const handleClose = (open: boolean) => {
     onOpenChange(open);
     if (!open) {
-      resetForm();
+      setTimeout(resetForm, 300); // Reset after closing animation
     }
   };
   
-  // Helper to determine what label to show for the config input
   const getConfigLabel = () => {
     switch(toolType) {
       case ToolType.DISCORD_WEBHOOK:
       case ToolType.SLACK_WEBHOOK:
       case ToolType.TEAMS_WEBHOOK:
         return 'Webhook URL';
-      case ToolType.WEB_SEARCH:
-        return 'API Key (Handled by Credentials)';
       default:
         return 'Configuration';
     }
   };
 
+  // Helper to determine if the config input should be shown
+  const showConfigInput = 
+    toolType === ToolType.DISCORD_WEBHOOK ||
+    toolType === ToolType.SLACK_WEBHOOK ||
+    toolType === ToolType.TEAMS_WEBHOOK;
+    
+  // Helper to determine if auth is handled by Connections page
+  const authHandledByConnections = 
+    toolType === ToolType.WEB_SEARCH ||
+    toolType === ToolType.GMAIL;
+
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add New Tool</DialogTitle>
           <DialogDescription>
             Add a new tool to your personal library. It will then be available in the sidebar.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="grid gap-4 py-4">
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="tool-name" className="text-right">Name</Label>
+        
+        {/* --- THIS IS THE NEW, CLEANER LAYOUT --- */}
+        <form onSubmit={handleSubmit} className="space-y-4 py-4">
+          
+          <div className="space-y-2">
+            <Label htmlFor="tool-name">Name</Label>
             <Input
               id="tool-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="col-span-3"
+              placeholder="e.g., My Discord Bot"
             />
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="tool-description" className="text-right">Description</Label>
+
+          <div className="space-y-2">
+            <Label htmlFor="tool-description">Description</Label>
             <Textarea
               id="tool-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="col-span-3"
               placeholder="Describes what this tool does..."
+              rows={3}
             />
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="tool-type" className="text-right">Tool Type</Label>
+
+          <div className="space-y-2">
+            <Label htmlFor="tool-type">Tool Type</Label>
             <Select value={toolType} onValueChange={(value: ToolType) => setToolType(value)}>
-              <SelectTrigger className="col-span-3">
+              <SelectTrigger id="tool-type">
                 <SelectValue placeholder="Select a type" />
               </SelectTrigger>
               <SelectContent>
-                {/* --- 4. Map over the new enum --- */}
                 <SelectItem value={ToolType.WEB_SEARCH}>Web Search</SelectItem>
+                <SelectItem value={ToolType.GMAIL}>Gmail</SelectItem>
                 <SelectItem value={ToolType.DISCORD_WEBHOOK}>Discord Webhook</SelectItem>
                 <SelectItem value={ToolType.SLACK_WEBHOOK}>Slack Webhook</SelectItem>
                 <SelectItem value={ToolType.TEAMS_WEBHOOK}>Microsoft Teams Webhook</SelectItem>
@@ -139,25 +155,24 @@ export const AddToolNodeDialog = ({ isOpen, onOpenChange, onSubmit }: AddToolNod
             </Select>
           </div>
           
-          {/* --- Add a conditional input for the config --- */}
-          {toolType !== ToolType.WEB_SEARCH && (
-             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="tool-config" className="text-right">
-                {getConfigLabel()}
-              </Label>
+          {/* Conditional Input for Webhook URL */}
+          {showConfigInput && (
+             <div className="space-y-2">
+              <Label htmlFor="tool-config">{getConfigLabel()}</Label>
               <Input
                 id="tool-config"
                 value={config}
                 onChange={(e) => setConfig(e.target.value)}
-                className="col-span-3"
                 type="password"
-                placeholder="Enter your secret URL or key"
+                placeholder="Enter your secret URL"
               />
             </div>
           )}
-          {toolType === ToolType.WEB_SEARCH && (
-            <p className="text-xs text-muted-foreground col-span-4 text-center">
-              Web Search API keys are managed on the 'Connections' page.
+          
+          {/* Helper text for OAuth/Credential tools */}
+          {authHandledByConnections && (
+            <p className="text-xs text-muted-foreground text-center p-2">
+              Authentication for this tool is managed on the 'Connections' page.
             </p>
           )}
 
@@ -165,7 +180,9 @@ export const AddToolNodeDialog = ({ isOpen, onOpenChange, onSubmit }: AddToolNod
             <Button type="button" variant="outline" onClick={() => handleClose(false)}>
               Cancel
             </Button>
-            <Button type="submit">Create Tool</Button>
+            <Button type="submit" disabled={isPending}>
+              {isPending ? <LoadingSpinner /> : "Create Tool"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
