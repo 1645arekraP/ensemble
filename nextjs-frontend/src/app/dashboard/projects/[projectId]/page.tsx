@@ -1,23 +1,34 @@
+// app/dashboard/projects/[projectId]/page.tsx
 "use client"
 
-import { use, useState, useMemo, useRef, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ApiAgentNode, getAgents, getProjectById, RunGraphResult } from '@/lib/api';
-import { type Project } from '@/lib/types'; // Assuming global types
+import { use, useState, useRef, useCallback, useEffect } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { 
+  ApiAgentNode, 
+  ApiToolNode, 
+  getAgents, 
+  getTools, 
+  getProjectById, 
+  RunGraphResult,
+  generateGraphFromPrompt
+} from '@/lib/api';
+import { 
+  type Project, 
+  GraphGenerateResponse, 
+  AgentNodeData, 
+  ToolNodeData,
+  ChatMessage
+} from '@/lib/types'; 
 
 import {
-  Background,
-  Controls,
-  Panel,
-  MiniMap,
-  ReactFlow,
   ReactFlowInstance,
+  Node,
+  Edge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import { SiteHeader } from "@/components/site-header";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea"; 
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from "sonner";
 
@@ -26,24 +37,11 @@ import AgentNode from './components/AgentNode';
 import ToolNode from './components/ToolNode';
 import { AddAgentNodeDialog } from './components/AddAgentNodeDialog';
 import { AddToolNodeDialog } from './components/AddToolNodeDialog';
-import { CanvasSidebar } from './components/CanvasSidebar';
 import { useProjectGraph } from './hooks/useProjectGraph';
-import { Label } from '@/components/ui/label';
+import { Toolbox } from './components/ToolBox';
+import { Canvas } from './components/Canvas';
+import { ControlPanel } from './components/ControlPanel';
 
-type RunGraphResult = {
-  success: boolean;
-  execution_id: number | null;
-  final_state: any;
-  messages: string[];
-  context: any;
-  agent_outputs: {
-    [key: string]: {
-      response: string;
-      [key: string]: any;
-    };
-  };
-  error?: string;
-};
 // Define node types for React Flow
 const nodeTypes = { agent: AgentNode, tool: ToolNode };
 
@@ -53,23 +51,35 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
   const resolvedParams = use(params);
   const { projectId } = resolvedParams;
 
-  //const [isAddToolDialogOpen, setIsAddToolDialogOpen] = useState(false);
-  //const [isAddAgentDialogOpen, setIsAddAgentDialogOpen] = useState(false);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  
+  // --- Layout State ---
+  const [isToolboxOpen, setIsToolboxOpen] = useState(true);
+  const [isControlPanelOpen, setIsControlPanelOpen] = useState(true);
 
-  const [reactFlowInstance, setReactFlowInstance] = useState<any | null>(null);
+  // --- STATE FOR RUNNING GRAPH ---
   const [graphInput, setGraphInput] = useState("");
   const [graphOutput, setGraphOutput] = useState<RunGraphResult | { error: string } | null>(null);
+  
+  // --- STATE FOR CHAT GENERATION ---
+  const [chatInput, setChatInput] = useState("");
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
 
   // --- Data Fetching ---
-  const { data: project, isLoading, error } = useQuery<Project, Error>({
+  const { data: project, isLoading: isLoadingProject, error: projectError } = useQuery<Project, Error>({
     queryKey: ['project', projectId],
     queryFn: () => getProjectById(projectId),
   });
-  const {data: agents, isLoadingAgents, errorFetchingAgents } = useQuery<ApiAgentNode[], Error> ({
+  
+  const {data: agents, isLoading: isLoadingAgents, error: agentsError } = useQuery<ApiAgentNode[], Error> ({
     queryKey: ['agents'],
     queryFn: () => getAgents(),
-  })
+  });
 
+  const {data: tools, isLoading: isLoadingTools, error: toolsError } = useQuery<ApiToolNode[], Error> ({
+    queryKey: ['tools'],
+    queryFn: () => getTools(),
+  });
 
   // --- Graph State Management ---
   const {
@@ -88,44 +98,76 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
     setIsAddToolDialogOpen,
     isAddAgentDialogOpen,
     setIsAddAgentDialogOpen,
-  } = useProjectGraph(projectId, project);
+    setNodes,
+    setEdges,
+    updateNodeData,
+    deleteNode,
+  } = useProjectGraph(projectId);
 
+  // --- Mutation for graph generation (NLP-to-Workflow) ---
+  const { mutate: generateGraph, isPending: isGenerating } = useMutation({
+    mutationFn: generateGraphFromPrompt,
+    onSuccess: (data: GraphGenerateResponse) => {
+      toast.success("Workflow Updated!", {
+        description: data.explanation,
+      });
+      setChatHistory(prev => [...prev, { role: 'ai', content: data.explanation }]);
+      const nodesWithUpdaters = data.graph.nodes.map((node) => ({
+        ...node,
+        data: { 
+          ...node.data, 
+          updateNodeData, 
+          deleteNode, 
+          allNodes: data.graph.nodes 
+        }
+      }));
+      setNodes(nodesWithUpdaters);
+      setEdges(data.graph.edges);
+      if (reactFlowInstance) {
+        reactFlowInstance.fitView();
+      }
+    },
+    onError: (err: Error) => {
+      const errorMessage = err.message || "An unknown error occurred.";
+      toast.error("Generation Failed", { description: errorMessage });
+      setChatHistory(prev => [...prev, { role: 'ai', content: `Sorry, I ran into an error: ${errorMessage}` }]);
+    },
+  });
+
+  // --- Handlers ---
+  const handleChatSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const prompt = chatInput.trim();
+    if (!prompt) return;
+    setChatHistory(prev => [...prev, { role: 'user', content: prompt }]);
+    setChatInput("");
+    const cleanNodes = nodes.map(node => {
+      const { updateNodeData, deleteNode, allNodes, ...restData } = node.data;
+      return { ...node, data: restData };
+    });
+    const current_graph_data = { nodes: cleanNodes, edges: edges };
+    generateGraph({ prompt, current_graph_data });
+  };
+  
   const handleSaveAndRun = () => {
-    setGraphOutput("");
-
-    // Call saveProject, and in its onSuccess, call runGraph
+    setGraphOutput(null);
     handleSaveProject(undefined, {
       onSuccess: (savedProject) => {
-        // Now that save is successful, call runGraph
         toast.info("Project saved. Running graph...");
         runGraph(
           { projectId, input: graphInput },
           {
-            // --- UPDATED: Robust parsing logic ---
-            onSuccess: (runResult: any) => { // Accept 'any' to be safe
+            onSuccess: (runResult: any) => {
               let data: RunGraphResult | { error: string };
-              
-              if (typeof runResult === 'string') {
-                try {
-                  data = JSON.parse(runResult);
-                } catch (e) {
-                  console.error("Failed to parse graph output:", e);
-                  data = { error: "Failed to parse server response." };
-                }
-              } else {
-                data = runResult; // Assume it's already an object
+              try {
+                data = typeof runResult === 'string' ? JSON.parse(runResult) : runResult;
+              } catch (e) {
+                data = { error: "Failed to parse server response." };
               }
-
               setGraphOutput(data);
-              
-              if (!data.error) {
-                toast.success("Graph run successful.");
-              } else {
-                toast.error("Graph run failed.");
-              }
+              toast.success("Graph run complete.");
             },
             onError: (runError: Error) => {
-              // 5. Set the ERROR object to state
               setGraphOutput({ error: runError.message });
               toast.error("Graph run failed.");
             }
@@ -133,79 +175,74 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
         );
       },
       onError: (saveError: Error) => {
-        // If saving fails, show that error
-        setGraphOutput(JSON.stringify({ error: `Failed to save before run: ${saveError.message}` }, null, 2));
+        setGraphOutput({ error: `Failed to save before run: ${saveError.message}` });
         toast.error("Failed to save project.");
       }
     });
   };
 
   const onAgentDragStart = useCallback((event: React.DragEvent, agent: ApiAgentNode) => {
-    const nodeData = {
-      type: 'agent', 
-      data: { ...agent, label: `${agent.name}` } 
-    };
+    const nodeData = { type: 'agent', data: agent }; // Pass full agent data
     event.dataTransfer.setData('application/reactflow', JSON.stringify(nodeData));
     event.dataTransfer.effectAllowed = 'move';
   }, []);
 
-  // --- onDragOver Handler ---
+  const onToolDragStart = useCallback((event: React.DragEvent, tool: ApiToolNode) => {
+    const nodeData = { type: 'tool', data: tool }; // Pass full tool data
+    event.dataTransfer.setData('application/reactflow', JSON.stringify(nodeData));
+    event.dataTransfer.effectAllowed = 'move';
+  }, []);
+
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
   }, []);
 
-  // --- onDrop Handler ---
   const onDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault();
-
     const nodeDataString = event.dataTransfer.getData('application/reactflow');
-    // --- UPDATED: Check for onNodesChange ---
-    if (!nodeDataString || !reactFlowInstance || !onNodesChange) {
-      return;
-    }
+    if (!nodeDataString || !reactFlowInstance) return;
     
     const { type, data } = JSON.parse(nodeDataString);
-
-    // --- UPDATED: Use the reactFlowInstance to get correct position ---
     const position = reactFlowInstance.screenToFlowPosition({ 
       x: event.clientX, 
       y: event.clientY 
     });
 
-    const newNode = {
-      id: `agent_instance_${crypto.randomUUID()}`,
+    const newNode: Node = {
+      id: `${type}_instance_${crypto.randomUUID()}`,
       type,
       position,
-      data,
+      data: {
+        ...data,
+        updateNodeData,
+        deleteNode,
+        allNodes: nodes,
+      }
     };
-
-    // --- UPDATED: Use onNodesChange to add the new node ---
     onNodesChange([{ type: 'add', item: newNode }]);
-    
-  }, [reactFlowInstance, onNodesChange]);
+  }, [reactFlowInstance, onNodesChange, updateNodeData, deleteNode, nodes]);
 
   // --- Render Logic ---
-  if (isLoading || isLoadingAgents) { // --- UPDATED: Combined loading state ---
+  const isLoading = isLoadingProject || isLoadingAgents || isLoadingTools;
+  const pageError = projectError || agentsError || toolsError;
+  
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
         <LoadingSpinner /><p className="ml-4">Loading Project Canvas...</p>
       </div>
     );
   }
-  if (error) { 
-    return <div className="p-8 text-red-500">Error: Failed to load project. {error.message}</div>;
+  if (pageError) { 
+    return <div className="p-8 text-red-500">Error: {pageError.message}</div>;
   }
-  if (errorFetchingAgents) { // --- ADDED: Specific error for agents ---
-    return <div className="p-8 text-red-500">Error: Failed to load agents. {errorFetchingAgents.message}</div>;
-  }
-  
   
   return (
-    
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="h-screen w-screen flex flex-col bg-neutral-50 overflow-hidden">
       <SiteHeader name={`Canvas: ${project?.name || '...'}`} />
-      
+
+      {/* Dialogs */}
       <AddToolNodeDialog
         isOpen={isAddToolDialogOpen}
         onOpenChange={setIsAddToolDialogOpen}
@@ -217,105 +254,88 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
         onSubmit={handleCreateAgentNode}
       />
       
-      {/* --- UPDATED: Flex layout --- */}
-      <div className="flex flex-grow overflow-hidden">
-        {/* Left Sidebar */}
-        <CanvasSidebar 
-          onAddAgentNode={() => setIsAddAgentDialogOpen(true)} 
-          onAddToolNode={() => setIsAddToolDialogOpen(true)} 
-          agents={agents || []} 
-          onAgentDragStart={onAgentDragStart} 
-        />
-        
-        {/* Main Canvas */}
-        <main className="flex-grow h-full">
-          <ReactFlow
+      {/* Main 3-Column Layout */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Left Sidebar - Toolbox */}
+        <div
+          className={`flex-shrink-0 transition-all duration-300 ease-in-out bg-white ${
+            isToolboxOpen ? 'w-64' : 'w-0'
+          }`}
+        >
+          <Toolbox 
+            isOpen={isToolboxOpen}
+            agents={agents || []}
+            tools={tools || []}
+            onAddAgentNode={() => setIsAddAgentDialogOpen(true)}
+            onAddToolNode={() => setIsAddToolDialogOpen(true)}
+            onAgentDragStart={onAgentDragStart}
+            onToolDragStart={onToolDragStart}
+          />
+        </div>
+
+        {/* Toggle Button for Toolbox */}
+        <button
+          onClick={() => setIsToolboxOpen(!isToolboxOpen)}
+          className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white border border-neutral-200 rounded-r-lg p-2 hover:bg-neutral-50 transition-colors shadow-sm"
+          style={{ transform: `translateX(${isToolboxOpen ? '256px' : '0px'})` }}
+        >
+          {isToolboxOpen ? (
+            <ChevronLeft className="w-4 h-4 text-neutral-600" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-neutral-600" />
+          )}
+        </button>
+
+        {/* Central Canvas */}
+        <div className="flex-1 flex flex-col min-w-0 h-full">
+          <Canvas 
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
-            fitView
-            onInit={setReactFlowInstance} 
-            onDragOver={onDragOver}       
-            onDrop={onDrop}            
-          >
-            {/* --- REMOVED: Panel was here --- */}
-            
-            <Controls />
-            <MiniMap />
-            <Background variant="dots" gap={12} size={1} />
-          </ReactFlow>
-        </main>
-        
-        {/* --- ADDED: Right Sidebar --- */}
-        <aside className="w-80 border-l bg-background p-4 flex flex-col gap-4 overflow-y-auto">
-          <h2 className="text-lg font-semibold">Controls & Output</h2>
-          
-          {/* Input */}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="graph-input">Input</Label>
-            <Textarea
-              id="graph-input"
-              placeholder="Enter input for the graph..."
-              value={graphInput}
-              onChange={(e) => setGraphInput(e.target.value)}
-              rows={3}
-            />
-          </div>
+            onInit={setReactFlowInstance}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
+          />
+        </div>
 
-          {/* Buttons */}
-          <div className="flex gap-2">
-            <Button 
-              onClick={() => handleSaveProject()} 
-              disabled={isSaving || isExecuting} 
-              variant="outline"
-              className="flex-1"
-            >
-              {isSaving ? 'Saving...' : 'Save'}
-            </Button>
-            <Button 
-              onClick={handleSaveAndRun} 
-              disabled={isSaving || isExecuting || !graphInput}
-              className="flex-1"
-            >
-              {isSaving ? 'Saving...' : isExecuting ? 'Running...' : 'Save & Run'}
-            </Button>
-          </div>
+        {/* Toggle Button for Control Panel */}
+        <button
+          onClick={() => setIsControlPanelOpen(!isControlPanelOpen)}
+          className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white border border-neutral-200 rounded-l-lg p-2 hover:bg-neutral-50 transition-colors shadow-sm"
+          style={{ transform: `translateX(${isControlPanelOpen ? '-384px' : '0px'})` }}
+        >
+          {isControlPanelOpen ? (
+            <ChevronRight className="w-4 h-4 text-neutral-600" />
+          ) : (
+            <ChevronLeft className="w-4 h-4 text-neutral-600" />
+          )}
+        </button>
 
-          {/* Output */}
-          <div className="flex-grow overflow-auto">
-            <h3 className="text-md font-semibold mb-2">Execution Output</h3>
-            {/* --- UPDATED: Output rendering --- */}
-            {graphOutput ? (
-              // --- UPDATED: Removed h-full, added min-h-0 ---
-              <div className="p-2 bg-muted rounded-md w-full overflow-auto shadow-inner flex flex-col gap-2 min-h-0"> 
-                {/* Check for error first */ console.log(graphOutput.success)}
-                {graphOutput.error && (
-                  <div className="p-2 bg-red-100 text-red-700 rounded-md">
-                    <strong>Error:</strong> {graphOutput.error}
-                  </div>
-                )}
-                
-                {/* If no error, check for agent outputs */}
-                {graphOutput.agent_outputs && Object.entries(graphOutput.agent_outputs).map(([agentName, output]) => (
-                  <div key={agentName} className="p-2 border bg-card rounded-md">
-                    <strong className="text-sm text-primary">{agentName}</strong>
-                    <pre className="text-xs whitespace-pre-wrap font-sans mt-1">
-                      {/* Display the clean 'response' string */ console.log(output)}
-                      {output.response}
-                    </pre>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground italic h-full flex items-center justify-center p-4 bg-muted rounded-md">
-                Run the graph to see the output.
-              </div>
-            )}
-          </div>
-        </aside>
+        {/* Right Sidebar - Control Panel */}
+        <div
+          className={`flex-shrink-0 transition-all duration-300 ease-in-out bg-white ${
+            isControlPanelOpen ? 'w-96' : 'w-0'
+          }`}
+        >
+          <ControlPanel 
+            isOpen={isControlPanelOpen}
+            chatHistory={chatHistory}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            handleChatSubmit={handleChatSubmit}
+            isGenerating={isGenerating}
+            graphInput={graphInput}
+            setGraphInput={setGraphInput}
+            graphOutput={graphOutput}
+            handleSaveProject={() => handleSaveProject()}
+            handleSaveAndRun={handleSaveAndRun}
+            isSaving={isSaving}
+            isExecuting={isExecuting}
+          />
+        </div>
       </div>
     </div>
   );

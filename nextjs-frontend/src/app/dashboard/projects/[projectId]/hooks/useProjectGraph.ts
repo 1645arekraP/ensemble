@@ -16,9 +16,11 @@ import {
   getProjectById, 
   updateProjectGraph, 
   createAgentNode,
+  createToolNode, 
   runProjectGraph, 
   RunGraphPayload, 
   RunGraphResult, 
+  ApiToolNode,   
 } from '@/lib/api';
 import { 
   Project, 
@@ -49,7 +51,6 @@ export const useProjectGraph = (projectId: string) => {
   });
 
   // --- Callbacks for Nodes (Memoized) ---
-  // These functions are passed into the node data, so they must be stable
   const updateNodeData = useCallback((nodeId: string, newData: Partial<AgentNodeData | ToolNodeData>) => {
     setNodes((prevNodes) =>
       prevNodes.map((node) =>
@@ -84,8 +85,8 @@ export const useProjectGraph = (projectId: string) => {
 
   // --- Effects to Sync State ---
 
-  // load initial graph data from the server
-  useEffect(() => {
+  // load initial graph data
+   useEffect(() => {
     if (project?.graph_data?.nodes) {
       const initialNodes = project.graph_data.nodes;
       // Inject the frontend-only callbacks into the nodes from the server
@@ -95,7 +96,7 @@ export const useProjectGraph = (projectId: string) => {
           ...node.data, 
           updateNodeData, 
           deleteNode, 
-          allNodes: initialNodes // Start with the initial list
+          allNodes: initialNodes
         }
       }));
       setNodes(nodesWithUpdaters);
@@ -103,8 +104,6 @@ export const useProjectGraph = (projectId: string) => {
     }
   }, [project, updateNodeData, deleteNode]); // Dependencies are stable callbacks
 
-  // Effect 2: Ensure every node has the most up-to-date list of all other nodes.
-  // This is for the 'Tools' dropdown in the AgentNode.
   const nodeDependencies = useMemo(() => 
     JSON.stringify(nodes.map(n => ({ id: n.id, name: n.data.name }))), 
     [nodes]
@@ -123,6 +122,7 @@ export const useProjectGraph = (projectId: string) => {
       );
     }
   }, [nodeDependencies]); // Re-runs only when the ID or name of any node changes
+
 
   // --- React Flow Callbacks ---
   const onNodesChange = useCallback((changes: NodeChange[]) => {
@@ -193,51 +193,48 @@ export const useProjectGraph = (projectId: string) => {
     }
   });
 
-  // This helper function creates a local-state-compatible node from an API response
-  const transformApiNodeToStateNode = (apiNode: any) => {
-    return {
-      ...apiNode,
-      id: apiNode.id.toString(), // Ensure ID is a string
-      position: apiNode.metadata?.position || { x: 250, y: 250 }, // Use saved or default position
-      // Re-inject the necessary callbacks and state
-      data: {
-        ...apiNode,
-        updateNodeData,
-        deleteNode,
-        allNodes: nodes, // Pass the current list of nodes
-      },
-    };
-  };
-
+  
   const createAgentNodeMutation = useMutation({
     mutationFn: createAgentNode,
-    onSuccess: (newNodeFromApi) => {
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
+    onSuccess: () => {
+      toast.success("Agent created successfully!");
+      queryClient.invalidateQueries({ queryKey: ['agents'] }); // This refetches for the sidebar
+      setIsAddAgentDialogOpen(false); // Close the dialog
     },
-    onError: (err) => {
+    onError: (err: Error) => {
       console.error("Failed to create agent node:", err);
       toast.error("Creation Failed", {
-      description: err.message || "Could not create the new agent. Please try again.",
-    });
+        description: err.message || "Could not create the new agent. Please try again.",
+      });
     }
   });
   
-  // TODO: Create a `createToolNodeMutation` similar to the one above
-  // when you are ready to persist tools to the database.
-
-  // --- UI Event Handlers ---
+  const createToolNodeMutation = useMutation({
+    mutationFn: createToolNode,
+    onSuccess: () => {
+      toast.success("Tool created successfully!");
+      queryClient.invalidateQueries({ queryKey: ['tools'] });
+      setIsAddToolDialogOpen(false); 
+    },
+    onError: (err: Error) => {
+      console.error("Failed to create tool node:", err);
+      toast.error("Tool Creation Failed", {
+        description: err.message || "Could not create the new tool. Please try again.",
+      });
+    }
+  });
 
   const handleOpenAddAgentDialog = () => setIsAddAgentDialogOpen(true);
   const handleOpenAddToolDialog = () => setIsAddToolDialogOpen(true);
 
+  
   const handleCreateAgentNode = (formData: AddAgentFormState) => {
     const newPosition = { x: Math.random() * 400, y: Math.random() * 400 };
 
     const payload: NewAgentNodePayload = {
-      project: projectId,
+      project: projectId, 
       ...formData,
-      tools: [], // New agents start with no tools
+      tools: [], 
       metadata: {
         position: newPosition,
       },
@@ -248,36 +245,20 @@ export const useProjectGraph = (projectId: string) => {
   const handleCreateToolNode = (formData: AddToolFormState) => {
     const newPosition = { x: Math.random() * 400, y: Math.random() * 400 };
 
-    // This follows your *original* logic of adding the node locally.
-    // When ready, replace this with a `createToolNodeMutation.mutate(payload)` call.
-    console.warn("handleCreateToolNode is adding node locally. Connect to a mutation for persistence.");
-    const newNodeId = `tool_${Date.now()}`;
-    const newNode: Node<ToolNodeData> = {
-      id: newNodeId,
-      type: 'tool',
-      position: newPosition,
-      data: {
-        ...formData,
-        updateNodeData,
-        deleteNode,
-      },
-    };
-    setNodes((nds) => [...nds, newNode]);
     
-    /* // --- The new logic would look like this: ---
     const payload: NewToolNodePayload = {
       project: projectId,
       ...formData,
       metadata: {
-        position: newPosition,
+        position: newPosition, 
       },
     };
-    // createToolNodeMutation.mutate(payload); 
-    */
+    
+    // Call the new mutation
+    createToolNodeMutation.mutate(payload);
   };
 
   // --- Return Values ---
-  // Expose all the state and handlers the page component will need
   return {
     project,
     isLoading,
@@ -287,6 +268,8 @@ export const useProjectGraph = (projectId: string) => {
     onNodesChange,
     onEdgesChange,
     onConnect,
+    setNodes, 
+    setEdges, 
     isSaving,
     handleSaveProject,
     isAddAgentDialogOpen,
@@ -299,5 +282,7 @@ export const useProjectGraph = (projectId: string) => {
     handleCreateToolNode,
     runGraph,
     isExecuting,
+    updateNodeData,
+    deleteNode,
   }
 }

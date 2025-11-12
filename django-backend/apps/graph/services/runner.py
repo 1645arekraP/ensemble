@@ -1,11 +1,13 @@
 from typing import Dict, Any, List, Optional
+import functools
 from langgraph.graph import StateGraph, END
 from ...agents.services.compiler import AgentCompiler, AgentState
 from ..models import Graph
 from ...agents.models import Agent
 from ...executions.models import ExecutionLog, ExecutionStep
 
-
+from ...tools.services.registry import TOOL_REGISTRY
+from ...tools.models import Tool
 
 
 class GraphCompiler:
@@ -30,7 +32,7 @@ class GraphCompiler:
         nodes_json = graph.graph_data.get('nodes', [])
         edges_json = graph.graph_data.get('edges', [])
 
-        # Map React Flow ID to agent name
+        # Map React Flow ID to agent/tool name
         rf_id_to_agent_name_map = {}
         
         # List of available worker agents for supervisor prompt
@@ -43,38 +45,74 @@ class GraphCompiler:
         supervisor_agent = None
 
         for node in nodes_json:
-            # Get agent data from the node
-            agent_data = node.get('data', {})
-            agent_db_id = agent_data.get('id')
-            agent_name = agent_data.get('label') or agent_data.get('name')
+            # --- MODIFICATION: Get node_type ---
+            node_type = node.get('type', 'agent') # Default to 'agent' for older graphs
             
-            # FIXED: Check the role from agent_data, not node type
-            agent_role = agent_data.get('role', 'general')
+            # Get common data
+            node_data = node.get('data', {})
+            node_name = node_data.get('label') or node_data.get('name')
+            rf_id = node.get('id')
+            
+            if not node_name or not rf_id:
+                raise ValueError(f"Node {rf_id} is missing 'id' or 'label'/'name'.")
 
-            if not agent_name or not agent_db_id:
-                raise ValueError(f"Node {node.get('id')} is missing 'id' or 'label' in its data property.")
+            # Map the React Flow ID to the agent's/tool's name
+            rf_id_to_agent_name_map[rf_id] = node_name
 
-            # Map the React Flow ID to the agent's name
-            rf_id_to_agent_name_map[node.get('id')] = agent_name
+            # --- MODIFICATION: Use if/elif for node types ---
+            
+            if node_type == 'agent':
+                agent_db_id = node_data.get('id')
+                agent_role = node_data.get('role', 'general')
 
-            # Fetch agent from database
-            try:
-                agent = Agent.objects.get(id=agent_db_id)
-                
-                # FIXED: Identify supervisor by checking the role field in agent_data
-                if agent_role == 'supervisor':
-                    supervisor_rf_id = node.get('id')
-                    supervisor_name = agent_name
-                    supervisor_agent = agent
-                    # DON'T compile supervisor yet - wait until we have all worker agents
-                else:
-                    # This is a worker agent - compile and add it now
-                    available_agent_nodes_for_prompt.append(agent)
-                    agent_node = self.agent_compiler.compile_agent(agent, graph_context={})
-                    workflow.add_node(agent_name, agent_node)
+                if not agent_db_id:
+                    raise ValueError(f"Agent node {node_name} (ID: {rf_id}) is missing 'id' in its data property.")
+
+                # Fetch agent from database
+                try:
+                    agent = Agent.objects.get(id=agent_db_id)
                     
-            except Agent.DoesNotExist:
-                raise ValueError(f"Agent '{agent_name}' (ID: {agent_db_id}) found in graph JSON but not in database.")
+                    if agent_role == 'supervisor':
+                        supervisor_rf_id = rf_id
+                        supervisor_name = node_name
+                        supervisor_agent = agent
+                    else:
+                        available_agent_nodes_for_prompt.append(agent)
+                        agent_node = self.agent_compiler.compile_agent(agent, graph_context={})
+                        workflow.add_node(node_name, agent_node)
+                        
+                except Agent.DoesNotExist:
+                    raise ValueError(f"Agent '{node_name}' (ID: {agent_db_id}) found in graph JSON but not in database.")
+
+            # --- NEW: Handle tool nodes ---
+            elif node_type == 'tool':
+                tool_db_id = node_data.get('id')
+                if not tool_db_id:
+                    raise ValueError(f"Tool node {node_name} (ID: {rf_id}) is missing 'id' in its data property.")
+
+                try:
+                    # 1. Fetch the Tool from the database
+                    tool = Tool.objects.get(id=tool_db_id)
+                    
+                    # 2. Look up its function from the registry
+                    tool_type_key = tool.tool_type
+                    base_tool_function = TOOL_REGISTRY.get(tool_type_key)
+                    
+                    if not base_tool_function:
+                        raise ValueError(f"Tool type '{tool_type_key}' for tool '{node_name}' not found in TOOL_REGISTRY.")
+                    
+                    # 3. Get the tool's config
+                    tool_config = tool.config or {}
+                    
+                    # 4. Create the node function by binding the config
+                    #    This creates a new function that just takes 'state'
+                    bound_tool_function = functools.partial(base_tool_function, config=tool_config)
+                    
+                    # 5. Add the bound function as a node
+                    workflow.add_node(node_name, bound_tool_function)
+
+                except Tool.DoesNotExist:
+                    raise ValueError(f"Tool '{node_name}' (ID: {tool_db_id}) found in graph JSON but not in database.")
 
         # --- NOW compile the supervisor with the correct context (only once) ---
         if supervisor_name and supervisor_agent:

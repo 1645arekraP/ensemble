@@ -1,101 +1,231 @@
+// components/AddAgentNodeDialog.tsx
+
 "use client"
 
 import { useState } from 'react';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useMutation } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogClose
+} from '@/components/ui/dialog';
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from "@/components/ui/textarea";
-import { AgentRole, AgentProvider, AddAgentFormState } from '../lib/types';
+import { AddAgentFormState } from '@/lib/types';
+import { generateAgentConfig } from '@/lib/api';
+import { Sparkles } from 'lucide-react';
+import LoadingSpinner from '@/components/LoadingSpinner';
+import { toast } from 'sonner';
+
+
+enum AgentRole {
+  GENERAL = 'general',
+  SUPERVISOR = 'supervisor',
+}
+
+
+enum AgentProvider {
+  OPENAI = 'openai',
+  ANTHROPIC = 'anthropic',
+  GOOGLE = 'google',
+  CUSTOM = 'custom'
+}
 
 interface AddAgentNodeDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (formData: AddAgentFormState) => void;
+  onSubmit: (formData: AddAgentFormState) => void; 
 }
 
-const defaultState: AddAgentFormState = {
-  name: 'New Agent',
-  description: 'A new AI agent.',
-  role: AgentRole.GENERAL,
-  provider: AgentProvider.OPENAI,
-  model: 'gpt-4o',
-  system_instruction_prompt: 'You are a helpful AI assistant.',
-};
+export const AddAgentNodeDialog = ({ 
+  isOpen, 
+  onOpenChange, 
+  onSubmit 
+}: AddAgentNodeDialogProps) => {
+  const [generationPrompt, setGenerationPrompt] = useState('');
 
-export const AddAgentNodeDialog = ({ isOpen, onOpenChange, onSubmit }: AddAgentNodeDialogProps) => {
-  const [formState, setFormState] = useState(defaultState);
+  // Form state with default values
+  const [name, setName] = useState('New Agent');
+  const [description, setDescription] = useState('A new AI agent.');
+  const [role, setRole] = useState<AgentRole>(AgentRole.GENERAL);
+  
+  const [provider, setProvider] = useState<AgentProvider>(AgentProvider.GOOGLE);
+  const [model, setModel] = useState('gemini-2.5-flash'); 
 
-  const handleChange = (field: keyof AddAgentFormState, value: string) => {
-    setFormState(prev => ({ ...prev, [field]: value as any })); // Use 'as any' for simplicity with enum/string union
-  };
+  const [systemPrompt, setSystemPrompt] = useState('You are a helpful AI assistant.');
 
   const resetForm = () => {
-    setFormState(defaultState);
+    setGenerationPrompt('');
+    setName('New Agent');
+    setDescription('A new AI agent.');
+    setRole(AgentRole.GENERAL);
+    setProvider(AgentProvider.OPENAI); // Reset provider
+    setModel('gpt-4o'); // Reset model
+    setSystemPrompt('You are a helpful AI assistant.');
   };
 
+  // --- Add the mutation for generating the config ---
+  const { mutate: generateConfig, isPending: isGenerating } = useMutation({
+    mutationFn: generateAgentConfig,
+    onSuccess: (data) => {
+      // Pre-fill the form fields with the AI's response
+      setName(data.name);
+      setDescription(data.description);
+      setSystemPrompt(data.system_instruction_prompt);
+      toast.success("Agent config generated!");
+    },
+    onError: (err: Error) => {
+      toast.error("Generation Failed", { description: err.message });
+    },
+  });
+
+  const handleGenerateClick = () => {
+    if (!generationPrompt) {
+      toast.error("Please enter a prompt to generate from.");
+      return;
+    }
+    generateConfig({ prompt: generationPrompt });
+  };
+  
+  // This is the final "Create" button submit
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(formState);
-    onOpenChange(false);
-    resetForm();
+    onSubmit({
+      name,
+      description,
+      role,
+      system_instruction_prompt: systemPrompt,
+      provider, // <-- ADDED
+      model,      // <-- ADDED
+    });
   };
 
   const handleClose = (open: boolean) => {
     onOpenChange(open);
     if (!open) {
-      resetForm();
+      setTimeout(resetForm, 300); // Reset after closing
     }
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-lg"> {/* Made dialog wider */}
         <DialogHeader>
-          <DialogTitle>Add New Agent Node</DialogTitle>
+          <DialogTitle>Add New Agent</DialogTitle>
           <DialogDescription>
-            Configure the details for your new AI agent.
+            Create a new agent in your library. It will then be available in the sidebar.
           </DialogDescription>
         </DialogHeader>
+
+        {/* --- "Generate" UI --- */}
+        <div className="space-y-2">
+          <Label htmlFor="generate-prompt">Generate from a prompt</Label>
+          <div className="flex gap-2">
+            <Textarea
+              id="generate-prompt"
+              placeholder="e.g., 'A snarky pirate researcher who finds information'"
+              value={generationPrompt}
+              onChange={(e) => setGenerationPrompt(e.target.value)}
+              rows={2}
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleGenerateClick}
+              disabled={isGenerating}
+              aria-label="Generate config"
+            >
+              {isGenerating ? <LoadingSpinner /> : <Sparkles className="h-4 w-4" />}
+            </Button>
+          </div>
+        </div>
+
+        <div className="h-px bg-border my-4" /> {/* Separator */}
+
+        {/* --- Main Agent Form --- */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="agent-name" className="text-right">Name</Label>
-            <Input id="agent-name" value={formState.name} onChange={(e) => handleChange('name', e.target.value)} className="col-span-3" />
+            <Input
+              id="agent-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="col-span-3"
+            />
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="agent-desc" className="text-right">Description</Label>
-            <Input id="agent-desc" value={formState.description} onChange={(e) => handleChange('description', e.target.value)} className="col-span-3" />
+            <Input
+              id="agent-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="col-span-3"
+            />
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="agent-role" className="text-right">Role</Label>
-            <Select value={formState.role} onValueChange={(value: AgentRole) => handleChange('role', value)}>
+            <Select value={role} onValueChange={(value: AgentRole) => setRole(value)}>
               <SelectTrigger className="col-span-3"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {Object.values(AgentRole).map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                {Object.values(AgentRole).map(r => (
+                  <SelectItem key={r} value={r}>{r}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+
+          {/* --- Provider Select --- */}
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="agent-provider" className="text-right">Provider</Label>
-            <Select value={formState.provider} onValueChange={(value: AgentProvider) => handleChange('provider', value)}>
+            <Select value={provider} onValueChange={(value: AgentProvider) => setProvider(value)}>
               <SelectTrigger className="col-span-3"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {Object.values(AgentProvider).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                {Object.values(AgentProvider).map(p => (
+                  <SelectItem key={p} value={p}>{p}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+
+          {/* --- Model Input --- */}
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="agent-model" className="text-right">Model</Label>
-            <Input id="agent-model" value={formState.model} onChange={(e) => handleChange('model', e.target.value)} className="col-span-3" />
+            <Input
+              id="agent-model"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="col-span-3"
+              placeholder="e.g., gpt-4o, gemini-1.5-flash"
+            />
           </div>
+
           <div className="grid grid-cols-4 items-start gap-4">
-            <Label htmlFor="agent-prompt" className="text-right pt-2">System Prompt</Label>
-            <Textarea id="agent-prompt" value={formState.system_instruction_prompt} onChange={(e) => handleChange('system_instruction_prompt', e.target.value)} className="col-span-3" rows={4} />
+            <Label htmlFor="agent-prompt" className="text-right pt-2">
+              System Prompt
+            </Label>
+            <Textarea
+              id="agent-prompt"
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              className="col-span-3"
+              rows={6}
+            />
           </div>
+          
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => handleClose(false)}>Cancel</Button>
-            <Button type="submit">Create Agent</Button>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">Cancel</Button>
+            </DialogClose>
+            <Button type="submit">
+              Create Agent
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

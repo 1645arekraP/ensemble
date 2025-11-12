@@ -1,41 +1,53 @@
+// components/Toolbox.tsx
 "use client"
 
-import { Button } from "@/components/ui/button";
-import { UserPlus, Wrench } from "lucide-react"; // Using icons for the buttons
+import React, { useState } from 'react';
+import { ChevronDown, ChevronRight, Users, Wrench, UserPlus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { ApiAgentNode, ApiToolNode } from '@/lib/types'; // Import your types
 
-// Updated props to include the list of agents for the toolbox
-interface CanvasSidebarProps {
+interface ToolboxProps {
+  isOpen: boolean;
+  agents: ApiAgentNode[];
+  tools: ApiToolNode[];
   onAddAgentNode: () => void;
   onAddToolNode: () => void;
-  agents: Array<{ id: string; name: string }>; // Pass in the agents from your useQuery
-  onAgentDragStart: (event: React.DragEvent, agent: { id: string; name: string }) => void;
+  onAgentDragStart: (event: React.DragEvent, agent: ApiAgentNode) => void;
+  onToolDragStart: (event: React.DragEvent, tool: ApiToolNode) => void;
 }
 
-export const CanvasSidebar = ({ 
-  onAddAgentNode, 
+export function Toolbox({
+  isOpen,
+  agents = [],
+  tools = [],
+  onAddAgentNode,
   onAddToolNode,
-  agents = [], // Default to empty array
-  onAgentDragStart
-}: CanvasSidebarProps) => {
+  onAgentDragStart,
+  onToolDragStart,
+}: ToolboxProps) {
+  const [isAgentsExpanded, setIsAgentsExpanded] = useState(true);
+  const [isToolsExpanded, setIsToolsExpanded] = useState(true);
+
+  if (!isOpen) return null;
+
   return (
-    <aside className="w-64 bg-background border-r p-4 flex flex-col gap-6">
-      
-      {/* Header: Title and round action buttons, aligned with flexbox */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold">Toolbox</h2>
+    <div className="h-full bg-white border-r border-neutral-200 flex flex-col overflow-hidden">
+      {/* Header with Add Buttons */}
+      <div className="h-14 border-b border-neutral-200 px-4 flex items-center justify-between flex-shrink-0">
+        <h2 className="text-neutral-900 font-semibold">Toolbox</h2>
         <div className="flex gap-2">
-          <Button 
-            onClick={onAddAgentNode} 
-            variant="outline" 
-            size="icon" 
+          <Button
+            onClick={onAddAgentNode}
+            variant="outline"
+            size="icon"
             aria-label="Add new agent"
           >
             <UserPlus className="h-4 w-4" />
           </Button>
-          <Button 
-            onClick={onAddToolNode} 
-            variant="outline" 
-            size="icon" 
+          <Button
+            onClick={onAddToolNode}
+            variant="outline"
+            size="icon"
             aria-label="Add new tool"
           >
             <Wrench className="h-4 w-4" />
@@ -43,31 +55,81 @@ export const CanvasSidebar = ({
         </div>
       </div>
 
-      {/* Agent Toolbox Section */}
-      <div className="flex flex-col gap-3">
-        <h3 className="text-sm font-medium text-muted-foreground px-1">Agents</h3>
-        <div className="flex flex-col gap-2">
-          {agents.length > 0 ? (
-            agents.map((agent) => (
-              <div
-                key={agent.id}
-                draggable
-                onDragStart={(event) => onAgentDragStart(event, agent)}
-                className="p-3 bg-card border rounded-md cursor-grab active:cursor-grabbing text-sm font-medium shadow-sm hover:bg-accent"
-              >
-                {agent.name}
-              </div>
-            ))
-          ) : (
-            <p className="text-xs text-muted-foreground text-center p-4 bg-muted/50 rounded-md">
-              Click the <UserPlus className="inline h-3 w-3 -mt-0.5"/> icon to create your first agent.
-            </p>
+      <div className="flex-1 overflow-y-auto">
+        {/* Agents Section */}
+        <div className="border-b border-neutral-200">
+          <button
+            onClick={() => setIsAgentsExpanded(!isAgentsExpanded)}
+            className="w-full px-4 py-3 flex items-center gap-2 hover:bg-neutral-50 transition-colors"
+          >
+            {isAgentsExpanded ? (
+              <ChevronDown className="w-4 h-4 text-neutral-500" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-neutral-500" />
+            )}
+            <Users className="w-4 h-4 text-neutral-600" />
+            <span className="text-neutral-700">Agents</span>
+          </button>
+
+          {isAgentsExpanded && (
+            <div className="pb-2 px-2 space-y-1">
+              {agents.length > 0 ? (
+                agents.map((agent) => (
+                  <div
+                    key={agent.id}
+                    draggable
+                    onDragStart={(event) => onAgentDragStart(event, agent)}
+                    className="w-full px-4 py-2 text-left text-neutral-600 hover:bg-neutral-50 transition-colors rounded-md cursor-grab active:cursor-grabbing border bg-card"
+                  >
+                    {agent.name}
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground text-center p-4">
+                  No agents created yet.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Tools Section */}
+        <div className="border-b border-neutral-200">
+          <button
+            onClick={() => setIsToolsExpanded(!isToolsExpanded)}
+            className="w-full px-4 py-3 flex items-center gap-2 hover:bg-neutral-50 transition-colors"
+          >
+            {isToolsExpanded ? (
+              <ChevronDown className="w-4 h-4 text-neutral-500" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-neutral-500" />
+            )}
+            <Wrench className="w-4 h-4 text-neutral-600" />
+            <span className="text-neutral-700">Tools</span>
+          </button>
+
+          {isToolsExpanded && (
+            <div className="pb-2 px-2 space-y-1">
+              {tools.length > 0 ? (
+                tools.map((tool) => (
+                  <div
+                    key={tool.id}
+                    draggable
+                    onDragStart={(event) => onToolDragStart(event, tool)}
+                    className="w-full px-4 py-2 text-left text-neutral-600 hover:bg-neutral-50 transition-colors rounded-md cursor-grab active:cursor-grabbing border bg-card"
+                  >
+                    {tool.name}
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground text-center p-4">
+                  No tools created yet.
+                </p>
+              )}
+            </div>
           )}
         </div>
       </div>
-      
-      {/* You could add a similar section for Tools here */}
-
-    </aside>
+    </div>
   );
-};
+}

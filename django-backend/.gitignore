@@ -1,5 +1,7 @@
 *.venv
 
+client_secret.json
+
 # Django #
 *.log
 *.pot
