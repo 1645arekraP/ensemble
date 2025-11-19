@@ -9,7 +9,7 @@ from pydantic import BaseModel # <-- Import BaseModel
 from django.conf import settings
 from django.db.models import Q
 from langgraph.graph import END, StateGraph
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 # --- 1. Import from the compiler file ---
 from ...agents.services.compiler import (
@@ -94,6 +94,18 @@ class GraphCompiler:
                         raise ValueError(f"Tool type '{tool.tool_type}' not in TOOL_REGISTRY.")
                     
                     tool_config = tool.config or {}
+                    
+                    # Inject API key from settings if not present in config
+                    if tool.tool_type == Tool.ToolType.WEB_SEARCH and 'api_key' not in tool_config:
+                        api_key = getattr(settings, 'TAVILY_API_KEY', None)
+                        if not api_key:
+                            import os
+                            api_key = os.environ.get('TAVILY_API_KEY')
+                        
+                        if api_key:
+                            tool_config['api_key'] = api_key
+                        else:
+                            print(f"WARNING: TAVILY_API_KEY not found in settings or environment for tool {tool.name}")
                     
                     # --- Create a wrapper for the tool node ---
                     def make_tool_node(func, cfg, tool_name):
@@ -336,3 +348,102 @@ class GraphRunner:
                 'messages': [],
                 'context': {}
             }
+
+    def run_graph_stream(self, graph: Graph, initial_input: str, context: Dict = None, user=None):
+        """
+        Streams the execution of the graph, yielding JSON chunks for each step.
+        """
+        execution_log = None
+        if user:
+            execution_log = ExecutionLog.objects.create(
+                graph=graph,
+                user=user,
+                initial_input=initial_input,
+                context=context or {}
+            )
+
+        try:
+            compiled_graph = self.graph_compiler.compile_graph(graph)
+            
+            initial_state = AgentState(
+                messages=[HumanMessage(content=initial_input, type='human')],
+                current_task=initial_input,
+                user=user, 
+                context=context or {},
+                next_agent=None,
+                is_complete=False,
+                supervisor_feedback=None,
+                task_queue=[],
+                completed_tasks=[],
+                agent_outputs={},
+                supervisor_decision=None
+            )
+            
+            state_dict = initial_state.model_dump(exclude_none=True)
+            
+            # Yield initial event
+            yield json.dumps({
+                "type": "start",
+                "execution_id": execution_log.id if execution_log else None,
+                "message": "Graph execution started."
+            }) + "\n"
+
+            # Stream the graph execution
+            final_state = None
+            for step_output in compiled_graph.stream(state_dict):
+                # step_output is a dict where keys are node names and values are state updates
+                for node_name, state_update in step_output.items():
+                    
+                    # Check for tool outputs or agent responses
+                    if 'agent_outputs' in state_update:
+                        outputs = state_update['agent_outputs']
+                        for agent_name, output_data in outputs.items():
+                            yield json.dumps({
+                                "type": "agent_output",
+                                "node": agent_name,
+                                "output": output_data.get('response', '')
+                            }) + "\n"
+                            
+                            # Log step
+                            if execution_log:
+                                ExecutionStep.objects.create(
+                                    execution=execution_log,
+                                    agent_name=agent_name,
+                                    input_data=output_data.get('input', ''),
+                                    output_data=output_data.get('response', ''),
+                                    metadata=output_data
+                                )
+
+                    # Check for tool execution (custom logic in our wrapper prints to stdout, 
+                    # but we can capture state changes here if needed)
+                    if 'current_task' in state_update:
+                         yield json.dumps({
+                            "type": "update",
+                            "node": node_name,
+                            "message": f"Node {node_name} updated state."
+                        }) + "\n"
+                    
+                    final_state = state_update # Keep track of the latest state
+
+            # Final success event
+            if execution_log:
+                execution_log.is_successful = True
+                execution_log.save()
+
+            yield json.dumps({
+                "type": "complete",
+                "status": "success",
+                "message": "Graph execution completed."
+            }) + "\n"
+
+        except Exception as e:
+            logger.exception(f"Error streaming graph for user {user.id if user else 'Unknown'}: {e}")
+            if execution_log:
+                execution_log.error_message = str(e)
+                execution_log.is_successful = False
+                execution_log.save()
+            
+            yield json.dumps({
+                "type": "error",
+                "error": str(e)
+            }) + "\n"

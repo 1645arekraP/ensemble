@@ -158,6 +158,7 @@ AUTH_USER_MODEL = 'users.User'
 
 # OpenAI settings
 OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
+TAVILY_API_KEY = config('TAVILY_API_KEY', default=None)
 
 # Rest Framework settings
 REST_FRAMEWORK = {

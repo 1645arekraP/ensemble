@@ -12,19 +12,20 @@ import {
   EdgeChange,
   NodeChange,
 } from '@xyflow/react';
-import { 
-  getProjectById, 
-  updateProjectGraph, 
+import {
+  getProjectById,
+  updateProjectGraph,
   createAgentNode,
-  createToolNode, 
-  runProjectGraph, 
-  RunGraphPayload, 
-  RunGraphResult, 
-  ApiToolNode,   
+  createToolNode,
+  runProjectGraph,
+  RunGraphPayload,
+  RunGraphResult,
+  ApiToolNode,
 } from '@/lib/api';
-import { 
-  Project, 
-  AgentNodeData, 
+import { apiClient } from '@/lib/apiClient';
+import {
+  Project,
+  AgentNodeData,
   ToolNodeData,
   AddAgentFormState,
   AddToolFormState,
@@ -68,8 +69,8 @@ export const useProjectGraph = (projectId: string) => {
       if (nodeToDelete && nodeToDelete.type === 'tool') {
         const deletedToolId = nodeToDelete.id;
         updatedNodes = updatedNodes.map(node => {
-          if (node.type === 'agent' && node.data.tools?.includes(deletedToolId)) {
-            const newTools = node.data.tools.filter((toolId: string) => toolId !== deletedToolId);
+          if (node.type === 'agent' && Array.isArray(node.data.tools) && node.data.tools.includes(deletedToolId)) {
+            const newTools = (node.data.tools as string[]).filter((toolId: string) => toolId !== deletedToolId);
             return { ...node, data: { ...node.data, tools: newTools } };
           }
           return node;
@@ -86,16 +87,16 @@ export const useProjectGraph = (projectId: string) => {
   // --- Effects to Sync State ---
 
   // load initial graph data
-   useEffect(() => {
+  useEffect(() => {
     if (project?.graph_data?.nodes) {
       const initialNodes = project.graph_data.nodes;
       // Inject the frontend-only callbacks into the nodes from the server
       const nodesWithUpdaters = initialNodes.map(node => ({
         ...node,
-        data: { 
-          ...node.data, 
-          updateNodeData, 
-          deleteNode, 
+        data: {
+          ...node.data,
+          updateNodeData,
+          deleteNode,
           allNodes: initialNodes
         }
       }));
@@ -104,8 +105,8 @@ export const useProjectGraph = (projectId: string) => {
     }
   }, [project, updateNodeData, deleteNode]); // Dependencies are stable callbacks
 
-  const nodeDependencies = useMemo(() => 
-    JSON.stringify(nodes.map(n => ({ id: n.id, name: n.data.name }))), 
+  const nodeDependencies = useMemo(() =>
+    JSON.stringify(nodes.map(n => ({ id: n.id, name: n.data.name }))),
     [nodes]
   );
 
@@ -171,8 +172,8 @@ export const useProjectGraph = (projectId: string) => {
       console.error('Failed to save project:', err);
       // TODO: Add user-facing toast notification
       toast.error("Saving Failed", {
-      description: err.message || "Could not save the project. Please try again.",
-    });
+        description: err.message || "Could not save the project. Please try again.",
+      });
     },
   });
 
@@ -193,9 +194,9 @@ export const useProjectGraph = (projectId: string) => {
     }
   });
 
-  
-  const { 
-    mutate: createAgentNodeMutation, 
+
+  const {
+    mutate: createAgentNodeMutation,
     isPending: isCreatingAgent
   } = useMutation({
     mutationFn: createAgentNode,
@@ -211,16 +212,16 @@ export const useProjectGraph = (projectId: string) => {
       });
     }
   });
-  
-  const { 
-    mutate: createToolNodeMutation, 
-    isPending: isCreatingTool 
+
+  const {
+    mutate: createToolNodeMutation,
+    isPending: isCreatingTool
   } = useMutation({
     mutationFn: createToolNode,
     onSuccess: () => {
       toast.success("Tool created successfully!");
       queryClient.invalidateQueries({ queryKey: ['tools'] });
-      setIsAddToolDialogOpen(false); 
+      setIsAddToolDialogOpen(false);
     },
     onError: (err: Error) => {
       console.error("Failed to create tool node:", err);
@@ -233,49 +234,107 @@ export const useProjectGraph = (projectId: string) => {
   const handleOpenAddAgentDialog = () => setIsAddAgentDialogOpen(true);
   const handleOpenAddToolDialog = () => setIsAddToolDialogOpen(true);
 
-  
+
   const handleCreateAgentNode = (formData: AddAgentFormState) => {
     const newPosition = { x: Math.random() * 400, y: Math.random() * 400 };
 
     const payload: NewAgentNodePayload = {
-      project: projectId, 
+      project: projectId,
       ...formData,
-      tools: [], 
+      tools: [],
       metadata: {
         position: newPosition,
       },
     };
-    createAgentNodeMutation.mutate(payload);
+    createAgentNodeMutation(payload);
   };
-  
+
   const handleCreateToolNode = (formData: AddToolFormState) => {
     const newPosition = { x: Math.random() * 400, y: Math.random() * 400 };
 
-    
+
     const payload: NewToolNodePayload = {
       project: projectId,
       ...formData,
       metadata: {
-        position: newPosition, 
+        position: newPosition,
       },
     };
-    
-    // Call the new mutation
-    createToolNodeMutation.mutate(payload);
+
+    // Call the mutation function directly
+    createToolNodeMutation(payload);
   };
+
+  // --- Streaming Execution ---
+  const runGraphStream = useCallback(async (payload: RunGraphPayload, callbacks?: {
+    onMessage?: (msg: any) => void,
+    onComplete?: () => void,
+    onError?: (err: any) => void
+  }) => {
+    // Fix: RunGraphPayload might not have 'project' if it's just { input: string }
+    // We need to ensure we have the projectId from the hook's scope
+    const { input } = payload;
+
+    try {
+      const response = await apiClient(`/api/graphs/${projectId}/stream/`, {
+        method: 'POST',
+        body: JSON.stringify({ input }),
+      }) as Response;
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error("No reader available");
+      }
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.trim()) {
+            try {
+              const data = JSON.parse(line);
+              callbacks?.onMessage?.(data);
+
+              if (data.type === 'complete' || data.type === 'error') {
+                // You might want to handle completion logic here
+              }
+            } catch (e) {
+              console.error("Error parsing JSON chunk", e);
+            }
+          }
+        }
+      }
+      callbacks?.onComplete?.();
+
+    } catch (error) {
+      console.error("Stream error:", error);
+      callbacks?.onError?.(error);
+      toast.error("Execution Failed", {
+        description: "Stream connection failed."
+      });
+    }
+  }, [projectId]); // Add projectId dependency
 
   // --- Return Values ---
   return {
     project,
-    isLoading,
-    error,
     nodes,
     edges,
     onNodesChange,
     onEdgesChange,
     onConnect,
-    setNodes, 
-    setEdges, 
+    setNodes,
+    setEdges,
     isSaving,
     handleSaveProject,
     isAddAgentDialogOpen,
@@ -287,6 +346,7 @@ export const useProjectGraph = (projectId: string) => {
     handleOpenAddToolDialog,
     handleCreateToolNode,
     runGraph,
+    runGraphStream, // Expose the new function
     isExecuting,
     updateNodeData,
     deleteNode,

@@ -24,21 +24,27 @@ def tavily_web_search(state: dict, config: dict) -> dict:
     logger.info(f"--- Running Tool: tavily_web_search ---")
     
     # Get the query from the state
-    query = state.get('current_task')
+    query = getattr(state, 'current_task', None)
     if not query:
         logger.warning("tavily_web_search: No 'current_task' found in state to use as query.")
-        return state
+        return {"current_task": "Error: No query provided."}
 
-    # Get the API key from the config
+    # Get the API key from the config or settings
     api_key = config.get('api_key')
     if not api_key:
-        logger.error("tavily_web_search: No 'api_key' found in tool config.")
-        state['current_task'] = "Error: Web search tool is missing its API key."
-        return state
+        from django.conf import settings
+        api_key = getattr(settings, 'TAVILY_API_KEY', None)
+    
+    if not api_key:
+        import os
+        api_key = os.environ.get('TAVILY_API_KEY')
+
+    if not api_key:
+        logger.error("tavily_web_search: No 'api_key' found in tool config, settings, or environment.")
+        return {"current_task": "Error: Web search tool is missing its API key."}
 
     logger.info(f"Searching for: '{query}'")
 
-    # 3. --- REAL API CALL ---
     try:
         # Initialize the Tavily client
         client = TavilyClient(api_key=api_key)
@@ -54,7 +60,7 @@ def tavily_web_search(state: dict, config: dict) -> dict:
         
         # Tavily's 'answer' field is a concise summary, perfect for agents.
         # If it's not available, we'll stringify the raw results.
-        search_output = results.get('answer', str(results.get('results', 'No results found.')))
+        search_output = results.get('answer') or str(results.get('results', 'No results found.'))
         
         logger.info(f"Search results: {search_output[:150]}...")
 
@@ -63,8 +69,4 @@ def tavily_web_search(state: dict, config: dict) -> dict:
         search_output = f"Error performing search: {e}"
 
     # Update the state with the results
-    #    We'll put the results back into 'current_task' to be passed to the next agent.
-    #    You could also add it to a 'tool_outputs' list or similar.
-    state['current_task'] = search_output
-    
-    return state
+    return {"current_task": search_output}

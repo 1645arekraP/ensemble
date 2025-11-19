@@ -14,6 +14,8 @@ import {
   OnEdgesChange,
   OnConnect,
   NodeTypes,
+  BackgroundVariant,
+  ConnectionLineType,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -50,13 +52,19 @@ export function Canvas({
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         fitView
+        defaultEdgeOptions={{
+          type: 'smoothstep',
+          animated: true,
+          style: { stroke: '#b1b1b7', strokeWidth: 2 },
+        }}
+        connectionLineType={ConnectionLineType.SmoothStep}
         onInit={onInit}
         onDragOver={onDragOver}
         onDrop={onDrop}
       >
         <Controls />
         <MiniMap />
-        <Background variant="dots" gap={12} size={1} />
+        <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#e5e5e5" />
       </ReactFlow>
     </div>
   );

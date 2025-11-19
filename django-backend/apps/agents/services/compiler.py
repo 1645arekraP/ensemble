@@ -432,6 +432,12 @@ class AgentCompiler:
         """Handle supervisor-specific routing logic"""
         response_content = state.messages[-1].content
         
+        # Handle case where content is a list (e.g. from some LLM providers or if it contains multiple blocks)
+        if isinstance(response_content, list):
+            response_content = " ".join([str(item) for item in response_content])
+        elif not isinstance(response_content, str):
+            response_content = str(response_content)
+        
         print("\n" + "🔍"*40)
         print("PARSING SUPERVISOR DECISION")
         print("🔍"*40)

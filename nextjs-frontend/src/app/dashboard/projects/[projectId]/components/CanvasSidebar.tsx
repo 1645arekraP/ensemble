@@ -2,9 +2,10 @@
 "use client"
 
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Users, Wrench, UserPlus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Users, Wrench, UserPlus, Box, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ApiAgentNode, ApiToolNode } from '@/lib/types'; // Import your types
+import { ApiAgentNode, ApiToolNode } from '@/lib/api'; // Import from api, not types
+import { cn } from '@/lib/utils';
 
 interface ToolboxProps {
   isOpen: boolean;
@@ -31,100 +32,115 @@ export function Toolbox({
   if (!isOpen) return null;
 
   return (
-    <div className="h-full bg-white border-r border-neutral-200 flex flex-col overflow-hidden">
+    <div className="h-full bg-white border-r border-neutral-200 flex flex-col overflow-hidden shadow-xl z-10">
       {/* Header with Add Buttons */}
-      <div className="h-14 border-b border-neutral-200 px-4 flex items-center justify-between flex-shrink-0">
-        <h2 className="text-neutral-900 font-semibold">Toolbox</h2>
-        <div className="flex gap-2">
+      <div className="h-14 border-b border-neutral-200 px-4 flex items-center justify-between flex-shrink-0 bg-neutral-50/50">
+        <div className="flex items-center gap-2">
+          <Box className="w-4 h-4 text-primary" />
+          <h2 className="text-sm font-semibold text-neutral-900">Components</h2>
+        </div>
+        <div className="flex gap-1">
           <Button
             onClick={onAddAgentNode}
-            variant="outline"
+            variant="ghost"
             size="icon"
-            aria-label="Add new agent"
+            className="h-8 w-8 hover:bg-white hover:shadow-sm transition-all"
+            title="Add new agent"
           >
-            <UserPlus className="h-4 w-4" />
+            <UserPlus className="h-4 w-4 text-neutral-600" />
           </Button>
           <Button
             onClick={onAddToolNode}
-            variant="outline"
+            variant="ghost"
             size="icon"
-            aria-label="Add new tool"
+            className="h-8 w-8 hover:bg-white hover:shadow-sm transition-all"
+            title="Add new tool"
           >
-            <Wrench className="h-4 w-4" />
+            <Wrench className="h-4 w-4 text-neutral-600" />
           </Button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {/* Agents Section */}
-        <div className="border-b border-neutral-200">
+        <div className="space-y-2">
           <button
             onClick={() => setIsAgentsExpanded(!isAgentsExpanded)}
-            className="w-full px-4 py-3 flex items-center gap-2 hover:bg-neutral-50 transition-colors"
+            className="w-full flex items-center justify-between text-xs font-semibold text-neutral-500 uppercase tracking-wider hover:text-neutral-800 transition-colors group"
           >
-            {isAgentsExpanded ? (
-              <ChevronDown className="w-4 h-4 text-neutral-500" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-neutral-500" />
-            )}
-            <Users className="w-4 h-4 text-neutral-600" />
-            <span className="text-neutral-700">Agents</span>
+            <div className="flex items-center gap-2">
+              <Users className="w-3 h-3" />
+              <span>Agents</span>
+            </div>
+            <ChevronDown className={cn("w-3 h-3 transition-transform", !isAgentsExpanded && "-rotate-90")} />
           </button>
 
           {isAgentsExpanded && (
-            <div className="pb-2 px-2 space-y-1">
+            <div className="space-y-2">
               {agents.length > 0 ? (
                 agents.map((agent) => (
                   <div
                     key={agent.id}
                     draggable
                     onDragStart={(event) => onAgentDragStart(event, agent)}
-                    className="w-full px-4 py-2 text-left text-neutral-600 hover:bg-neutral-50 transition-colors rounded-md cursor-grab active:cursor-grabbing border bg-card"
+                    className="group flex items-center gap-3 p-3 bg-white border border-neutral-200 rounded-lg shadow-sm hover:border-primary/50 hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
                   >
-                    {agent.name}
+                    <div className="p-2 bg-blue-50 text-blue-600 rounded-md">
+                      <Users className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-neutral-900 truncate">{agent.name}</p>
+                      <p className="text-xs text-neutral-500 truncate">{agent.role || 'General Agent'}</p>
+                    </div>
+                    <GripVertical className="w-4 h-4 text-neutral-300 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 ))
               ) : (
-                <p className="text-xs text-muted-foreground text-center p-4">
-                  No agents created yet.
-                </p>
+                <div className="text-center p-4 border border-dashed border-neutral-200 rounded-lg bg-neutral-50/50">
+                  <p className="text-xs text-neutral-400">No agents available</p>
+                </div>
               )}
             </div>
           )}
         </div>
 
         {/* Tools Section */}
-        <div className="border-b border-neutral-200">
+        <div className="space-y-2">
           <button
             onClick={() => setIsToolsExpanded(!isToolsExpanded)}
-            className="w-full px-4 py-3 flex items-center gap-2 hover:bg-neutral-50 transition-colors"
+            className="w-full flex items-center justify-between text-xs font-semibold text-neutral-500 uppercase tracking-wider hover:text-neutral-800 transition-colors group"
           >
-            {isToolsExpanded ? (
-              <ChevronDown className="w-4 h-4 text-neutral-500" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-neutral-500" />
-            )}
-            <Wrench className="w-4 h-4 text-neutral-600" />
-            <span className="text-neutral-700">Tools</span>
+            <div className="flex items-center gap-2">
+              <Wrench className="w-3 h-3" />
+              <span>Tools</span>
+            </div>
+            <ChevronDown className={cn("w-3 h-3 transition-transform", !isToolsExpanded && "-rotate-90")} />
           </button>
 
           {isToolsExpanded && (
-            <div className="pb-2 px-2 space-y-1">
+            <div className="space-y-2">
               {tools.length > 0 ? (
                 tools.map((tool) => (
                   <div
                     key={tool.id}
                     draggable
                     onDragStart={(event) => onToolDragStart(event, tool)}
-                    className="w-full px-4 py-2 text-left text-neutral-600 hover:bg-neutral-50 transition-colors rounded-md cursor-grab active:cursor-grabbing border bg-card"
+                    className="group flex items-center gap-3 p-3 bg-white border border-neutral-200 rounded-lg shadow-sm hover:border-primary/50 hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
                   >
-                    {tool.name}
+                    <div className="p-2 bg-purple-50 text-purple-600 rounded-md">
+                      <Wrench className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-neutral-900 truncate">{tool.name}</p>
+                      <p className="text-xs text-neutral-500 truncate capitalize">{tool.tool_type.replace('_', ' ')}</p>
+                    </div>
+                    <GripVertical className="w-4 h-4 text-neutral-300 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 ))
               ) : (
-                <p className="text-xs text-muted-foreground text-center p-4">
-                  No tools created yet.
-                </p>
+                <div className="text-center p-4 border border-dashed border-neutral-200 rounded-lg bg-neutral-50/50">
+                  <p className="text-xs text-neutral-400">No tools available</p>
+                </div>
               )}
             </div>
           )}

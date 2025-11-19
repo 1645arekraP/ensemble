@@ -3,22 +3,22 @@
 import { use, useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { 
-  ApiAgentNode, 
-  ApiToolNode, 
-  getAgents, 
-  getTools, 
-  getProjectById, 
+import {
+  ApiAgentNode,
+  ApiToolNode,
+  getAgents,
+  getTools,
+  getProjectById,
   RunGraphResult,
   generateGraphFromPrompt
 } from '@/lib/api';
-import { 
-  type Project, 
-  GraphGenerateResponse, 
-  AgentNodeData, 
+import {
+  type Project,
+  GraphGenerateResponse,
+  AgentNodeData,
   ToolNodeData,
   ChatMessage
-} from '@/lib/types'; 
+} from '@/lib/types';
 
 import {
   ReactFlowInstance,
@@ -51,15 +51,15 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
   const { projectId } = resolvedParams;
 
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
-  
+
   // --- Layout State ---
   const [isToolboxOpen, setIsToolboxOpen] = useState(true);
   const [isControlPanelOpen, setIsControlPanelOpen] = useState(true);
 
   // --- STATE FOR RUNNING GRAPH ---
   const [graphInput, setGraphInput] = useState("");
-  const [graphOutput, setGraphOutput] = useState<RunGraphResult | { error: string } | null>(null);
-  
+  const [logs, setLogs] = useState<any[]>([]); // Store streaming logs
+
   // --- STATE FOR CHAT GENERATION ---
   const [chatInput, setChatInput] = useState("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -69,13 +69,13 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
     queryKey: ['project', projectId],
     queryFn: () => getProjectById(projectId),
   });
-  
-  const {data: agents, isLoading: isLoadingAgents, error: agentsError } = useQuery<ApiAgentNode[], Error> ({
+
+  const { data: agents, isLoading: isLoadingAgents, error: agentsError } = useQuery<ApiAgentNode[], Error>({
     queryKey: ['agents'],
     queryFn: () => getAgents(),
   });
 
-  const {data: tools, isLoading: isLoadingTools, error: toolsError } = useQuery<ApiToolNode[], Error> ({
+  const { data: tools, isLoading: isLoadingTools, error: toolsError } = useQuery<ApiToolNode[], Error>({
     queryKey: ['tools'],
     queryFn: () => getTools(),
   });
@@ -84,16 +84,16 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
   const {
     nodes,
     edges,
-    onNodesChange, 
+    onNodesChange,
     onEdgesChange,
     onConnect,
     handleCreateAgentNode,
     handleCreateToolNode,
     handleSaveProject,
     isSaving,
-    runGraph,
+    runGraphStream, // Use the streaming hook
     isExecuting,
-    isAddToolDialogOpen, 
+    isAddToolDialogOpen,
     setIsAddToolDialogOpen,
     isAddAgentDialogOpen,
     setIsAddAgentDialogOpen,
@@ -101,8 +101,8 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
     setEdges,
     updateNodeData,
     deleteNode,
-    isCreatingAgent, // <-- 1. Get the loading state
-    isCreatingTool,  // <-- 1. Get the loading state
+    isCreatingAgent,
+    isCreatingTool,
   } = useProjectGraph(projectId);
 
   // --- Mutation for graph generation (NLP-to-Workflow) ---
@@ -111,19 +111,19 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
     onSuccess: (data: GraphGenerateResponse) => {
       toast.success("Workflow Updated!", { description: data.explanation });
       setChatHistory(prev => [...prev, { role: 'ai', content: data.explanation }]);
-      
+
       const nodesWithUpdaters = data.graph.nodes.map((node) => ({
         ...node,
-        data: { 
-          ...node.data, 
-          updateNodeData, 
-          deleteNode, 
-          allNodes: data.graph.nodes 
+        data: {
+          ...node.data,
+          updateNodeData,
+          deleteNode,
+          allNodes: data.graph.nodes
         }
       }));
       setNodes(nodesWithUpdaters);
       setEdges(data.graph.edges);
-      
+
       if (reactFlowInstance) {
         reactFlowInstance.fitView();
       }
@@ -149,34 +149,30 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
     const current_graph_data = { nodes: cleanNodes, edges: edges };
     generateGraph({ prompt, current_graph_data });
   };
-  
+
   const handleSaveAndRun = () => {
-    setGraphOutput(null);
+    setLogs([]); // Clear previous logs
     handleSaveProject(undefined, {
       onSuccess: (savedProject) => {
-        toast.info("Project saved. Running graph...");
-        runGraph(
+        toast.info("Project saved. Starting execution...");
+
+        runGraphStream(
           { projectId, input: graphInput },
           {
-            onSuccess: (runResult: any) => {
-              let data: RunGraphResult | { error: string };
-              try {
-                data = typeof runResult === 'string' ? JSON.parse(runResult) : runResult;
-              } catch (e) {
-                data = { error: "Failed to parse server response." };
-              }
-              setGraphOutput(data);
-              toast.success("Graph run complete.");
+            onMessage: (msg: any) => {
+              setLogs(prev => [...prev, msg]);
             },
-            onError: (runError: Error) => {
-              setGraphOutput({ error: runError.message });
-              toast.error("Graph run failed.");
+            onComplete: () => {
+              toast.success("Graph execution completed.");
+            },
+            onError: (err: any) => {
+              toast.error("Graph execution failed.");
+              setLogs(prev => [...prev, { type: 'error', error: err.message || "Unknown error" }]);
             }
           }
         );
       },
       onError: (saveError: Error) => {
-        setGraphOutput({ error: `Failed to save before run: ${saveError.message}` });
         toast.error("Failed to save project.");
       }
     });
@@ -203,11 +199,11 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
     event.preventDefault();
     const nodeDataString = event.dataTransfer.getData('application/reactflow');
     if (!nodeDataString || !reactFlowInstance) return;
-    
+
     const { type, data } = JSON.parse(nodeDataString);
-    const position = reactFlowInstance.screenToFlowPosition({ 
-      x: event.clientX, 
-      y: event.clientY 
+    const position = reactFlowInstance.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY
     });
 
     const newNode: Node = {
@@ -227,7 +223,7 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
   // --- Render Logic ---
   const isLoading = isLoadingProject || isLoadingAgents || isLoadingTools;
   const pageError = projectError || agentsError || toolsError;
-  
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -235,10 +231,10 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
       </div>
     );
   }
-  if (pageError) { 
+  if (pageError) {
     return <div className="p-8 text-red-500">Error: {pageError.message}</div>;
   }
-  
+
   return (
     <div className="h-screen w-screen flex flex-col bg-neutral-50 overflow-hidden">
       <SiteHeader name={`Canvas: ${project?.name || '...'}`} />
@@ -248,7 +244,7 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
         isOpen={isAddToolDialogOpen}
         onOpenChange={setIsAddToolDialogOpen}
         onSubmit={handleCreateToolNode}
-        isPending={isCreatingTool} 
+        isPending={isCreatingTool}
       />
       <AddAgentNodeDialog
         isOpen={isAddAgentDialogOpen}
@@ -256,16 +252,15 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
         onSubmit={handleCreateAgentNode}
         isPending={isCreatingAgent}
       />
-      
+
       {/* Main 3-Column Layout */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Sidebar - Toolbox */}
         <div
-          className={`flex-shrink-0 transition-all duration-300 ease-in-out bg-white ${
-            isToolboxOpen ? 'w-64' : 'w-0'
-          }`}
+          className={`flex-shrink-0 transition-all duration-300 ease-in-out bg-white ${isToolboxOpen ? 'w-64' : 'w-0'
+            }`}
         >
-          <Toolbox 
+          <Toolbox
             isOpen={isToolboxOpen}
             agents={agents || []}
             tools={tools || []}
@@ -291,7 +286,7 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
 
         {/* Central Canvas */}
         <div className="flex-1 flex flex-col min-w-0 h-full">
-          <Canvas 
+          <Canvas
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
@@ -319,11 +314,10 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
 
         {/* Right Sidebar - Control Panel */}
         <div
-          className={`flex-shrink-0 transition-all duration-300 ease-in-out bg-white ${
-            isControlPanelOpen ? 'w-96' : 'w-0'
-          }`}
+          className={`flex-shrink-0 transition-all duration-300 ease-in-out bg-white ${isControlPanelOpen ? 'w-96' : 'w-0'
+            }`}
         >
-          <ControlPanel 
+          <ControlPanel
             isOpen={isControlPanelOpen}
             chatHistory={chatHistory}
             chatInput={chatInput}
@@ -332,7 +326,7 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
             isGenerating={isGenerating}
             graphInput={graphInput}
             setGraphInput={setGraphInput}
-            graphOutput={graphOutput}
+            logs={logs}
             handleSaveProject={() => handleSaveProject()}
             handleSaveAndRun={handleSaveAndRun}
             isSaving={isSaving}

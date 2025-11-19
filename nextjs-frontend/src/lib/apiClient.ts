@@ -40,9 +40,9 @@ export const apiClient = async (url: string, options: RequestInit = {}) => {
 
         const { access: newAccessToken } = await refreshResponse.json();
         setAccessToken(newAccessToken);
-        
+
         processQueue(null, newAccessToken); // Process queued requests successfully
-        
+
         // Retry the original request
         headers.set('Authorization', `Bearer ${newAccessToken}`);
         options.headers = headers;
@@ -103,7 +103,7 @@ export const initializeAuth = async (): Promise<void> => {
   try {
     const refreshResponse = await fetch('/api/auth/refresh/', { method: 'POST' });
     if (!refreshResponse.ok) throw new Error('No valid session.');
-    
+
     const { access: newAccessToken } = await refreshResponse.json();
     setAccessToken(newAccessToken);
     console.log("Refreshed")
@@ -111,9 +111,9 @@ export const initializeAuth = async (): Promise<void> => {
     processQueue(error as Error, null);
     logout();
     if (typeof window !== 'undefined') {
-        window.location.href = '/login';
+      window.location.href = '/login';
     }
     // Throw our new custom error instead of a generic one
     return Promise.reject(new AuthError('Session expired.'));
-    } 
+  }
 };

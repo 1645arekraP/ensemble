@@ -4,6 +4,7 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from apps.credentials.models import UserCredential, Tool, decrypt_secret
 from apps.credentials.services import refresh_google_token # Import our new service
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -13,11 +14,11 @@ def read_gmail_inbox(state: dict, config: dict) -> dict:
     """
     logger.info(f"--- Running Tool: read_gmail_inbox ---")
     
-    user = state.get('user')
+    # Access user from state object (Pydantic model)
+    user = getattr(state, 'user', None)
     if not user:
         logger.error("read_gmail_inbox: No user found in state.")
-        state['current_task'] = "Error: User not authenticated for tool."
-        return state
+        return {"current_task": "Error: User not authenticated for tool."}
 
     try:
         # 1. Fetch the user's Gmail credential
@@ -68,6 +69,5 @@ def read_gmail_inbox(state: dict, config: dict) -> dict:
         logger.error(f"Gmail read failed: {e}")
         output = f"Error reading Gmail: {e}"
 
-    # 5. Update the state with the results
-    state['current_task'] = output
-    return state
+    # 5. Return the state update
+    return {"current_task": output}
