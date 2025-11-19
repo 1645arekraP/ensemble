@@ -24,15 +24,15 @@ export function LoginForm({
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  
-  const { login } = useAuth(); 
+
+  const { login } = useAuth();
 
   const { mutate, isPending, error } = useMutation({
     // mutationFn expects the function that returns a promise
     mutationFn: () => loginUser(email, password),
     onSuccess: () => {
       console.log("Login successful! Invalidating user query to trigger redirect.");
-      
+
       // This tells the AuthProvider to refetch the user, which will
       // automatically trigger the redirect in your GuestAuthWrapper.
       queryClient.invalidateQueries({ queryKey: ['currentUser'] });
@@ -51,22 +51,22 @@ export function LoginForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="overflow-hidden p-0">
-        <CardContent className="grid p-0 md:grid-cols-2">
+      <Card className="overflow-hidden">
+        <CardContent className="p-0">
           <form onSubmit={handleSubmit} className="p-6 md:p-8">
             <div className="flex flex-col gap-6">
               <div className="flex flex-col items-center text-center">
                 <h1 className="text-2xl font-bold">Welcome back</h1>
                 <p className="text-muted-foreground text-balance">
-                  Login to your Adniri account
+                  Login to your Ensemble account
                 </p>
               </div>
               <div className="grid gap-3">
-                <Label htmlFor="username">Username</Label>
+                <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
-                  placeholder="email"
+                  placeholder="m@example.com"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -83,28 +83,19 @@ export function LoginForm({
                     Forgot your password?
                   </a>
                 </div>
-                <Input id="password" type="password" required  value={password} onChange={(e) => setPassword(e.target.value)}/>
+                <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} disabled={isPending} />
               </div>
-              <Button type="submit" className="w-full">
-                Login
+              <Button type="submit" className="w-full" disabled={isPending}>
+                {isPending ? "Logging in..." : "Login"}
               </Button>
-              {/*
               <div className="text-center text-sm">
                 Don&apos;t have an account?{" "}
-                <a href="#" className="underline underline-offset-4">
+                <a href="/register" className="underline underline-offset-4">
                   Sign up
                 </a>
               </div>
-              */}
             </div>
           </form>
-          <div className="bg-muted relative hidden md:block">
-            <img
-              src="/placeholder.svg"
-              alt="Image"
-              className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
-            />
-          </div>
         </CardContent>
       </Card>
       <div className="text-muted-foreground *:[a]:hover:text-primary text-center text-xs text-balance *:[a]:underline *:[a]:underline-offset-4">

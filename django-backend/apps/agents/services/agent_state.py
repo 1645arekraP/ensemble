@@ -1,4 +1,5 @@
-from typing import Dict, Any, List, Optional
+import operator
+from typing import Dict, Any, List, Optional, Annotated
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -11,8 +12,9 @@ from ..models import Agent
 
 class AgentState(BaseModel):
     """Shared state between agents in the graph"""
-    messages: List[BaseMessage] = Field(default_factory=list)
+    messages: Annotated[List[BaseMessage], operator.add]
     current_task: str = ""
+    user: Optional[Any] = None
     context: Dict[str, Any] = Field(default_factory=dict)
     next_agent: Optional[str] = None
     is_complete: bool = False

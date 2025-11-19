@@ -1,6 +1,9 @@
 import { apiClient, setAccessToken } from './apiClient';
 import { LoginResponse, NewUserData, User } from './interfaces';
-import { Project } from './types';
+import { GraphGeneratePayload, GraphGenerateResponse, Project } from './types';
+import { type Tool } from "@/lib/types";
+import { NewToolNodePayload } from './types';
+import { ApiTool, UserCredential, NewCredentialPayload } from './types';
 
 /**
  * The single function to restore a user's session.
@@ -128,3 +131,239 @@ export const updateProjectGraph = async ({ projectId, graphData }: { projectId: 
   }
   return response.json();
 };
+
+
+export interface NewAgentNodePayload {
+  project: number | string; // Project ID
+  name: string;
+  description: string;
+  system_instruction_prompt: string;
+  role: string; 
+  provider: string; 
+  model: string;
+  tools: number[]; // Array of Tool node primary keys
+  metadata: {
+    position: { x: number; y: number };
+  };
+}
+
+
+
+
+export interface ApiAgentNode {
+  id: number; // The database primary key
+  name: string;
+  description: string;
+  system_instruction_prompt: string;
+  role: AgentRole;
+  provider: AgentProvider;
+  model: string;
+  tools: number[]; // Array of Tool node primary keys
+  metadata: {
+    position: { x: number; y: number };
+  };
+}
+
+// We'll also need one for Tools
+export interface ApiToolNode {
+  id: number; // The database primary key
+  name: string;
+  description: string;
+  tool_type: ToolType;
+  metadata: {
+    position: { x: number; y: number };
+  };
+}
+
+export type ApiNode = 
+  | ({ type: 'agent' } & ApiAgentNode) 
+  | ({ type: 'tool' } & ApiToolNode);
+
+
+/**
+ * Creates a new agent node on the backend.
+ */
+export const createAgentNode = async (payload: NewAgentNodePayload): Promise<ApiAgentNode> => {
+  const response = await apiClient('/api/agents/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ 
+      detail: 'Failed to create agent node.'
+    }));
+    throw new Error(errorData.detail);
+  }
+
+  return response.json();
+};
+
+/**
+ * Fetches all agents available to user
+ */
+export const getAgents = async (): Promise<ApiAgentNode[]> => {
+  const response = await apiClient(`/api/agents/`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch agents details.');
+  }
+  return response.json();
+};
+
+
+export interface RunGraphPayload {
+  projectId: string;
+  input: string;
+}
+
+export interface RunGraphResult {
+  result: any;
+  [key: string]: any; // To allow for other data like intermediate steps
+}
+
+/**
+ * Sends the graph execution request to the backend.
+ * This just triggers the run; it assumes the graph is already saved.
+ */
+export const runProjectGraph = async (payload: RunGraphPayload): Promise<RunGraphResult> => {
+  const { projectId, input } = payload;
+  
+  // This endpoint is consistent with your getProjectById and updateProjectGraph
+  // and matches the backend file structure (`apps/executions` or `apps/graph`)
+  const response = await apiClient(`/api/graphs/${projectId}/run/`, {
+    method: 'POST',
+    body: JSON.stringify({
+      input: input, // Send the user's input
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ message: 'Failed to run graph' }));
+    throw new Error(err.message || 'Failed to run graph. Check server logs.');
+  }
+
+  return response.json();
+};
+
+export async function getTools(): Promise<Tool[]> {
+  // We'll assume your apiClient handles the auth token
+  const response = await apiClient('/api/tools/'); 
+  if (!response.ok) {
+    throw new Error('Failed to fetch tools');
+  }
+  return response.json();
+}
+
+/**
+ * Creates a new Tool node in the backend's "tool library".
+ */
+export async function createToolNode(payload: NewToolNodePayload): Promise<ApiToolNode> {
+  const response = await apiClient('/api/tools/', { // Assumes your API endpoint is /api/tools/
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || 'Failed to create tool');
+  }
+  
+  return response.json();
+}
+
+export async function getCredentials(): Promise<UserCredential[]> {
+  const response = await apiClient('/api/credentials/');
+  if (!response.ok) {
+    throw new Error('Failed to fetch credentials');
+  }
+  return response.json();
+}
+
+/**
+ * Creates a new, encrypted credential in the backend.
+ */
+export async function createCredential(payload: NewCredentialPayload): Promise<UserCredential> {
+  const response = await apiClient('/api/credentials/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || 'Failed to save credential');
+  }
+  return response.json();
+}
+
+/**
+ * Deletes a credential.
+ */
+export async function deleteCredential(id: number): Promise<void> {
+  const response = await apiClient(`/api/credentials/${id}/`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to delete credential');
+  }
+}
+
+/**
+ * Calls the backend to get a Google OAuth redirect URL.
+ */
+export async function getGoogleConnectUrl(): Promise<{ authorization_url: string }> {
+  const response = await apiClient('/api/auth/google/connect/');
+  if (!response.ok) {
+    throw new Error('Failed to get Google connect URL');
+  }
+  return response.json();
+}
+
+
+export interface AgentConfigPayload {
+  prompt: string;
+}
+
+export interface AgentConfigResponse {
+  name: string;
+  description: string;
+  system_instruction_prompt: string;
+}
+
+/**
+ * Calls the backend to generate an agent's configuration from a prompt.
+ */
+export async function generateAgentConfig(
+  payload: AgentConfigPayload
+): Promise<AgentConfigResponse> {
+  const response = await apiClient('/api/agents/generate-config/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || 'Failed to generate agent config');
+  }
+  
+  return response.json();
+}
+
+/**
+ * Calls the backend to generate a full graph_data JSON from a prompt.
+ */
+export async function generateGraphFromPrompt(
+  payload: GraphGeneratePayload
+): Promise<GraphGenerateResponse> {
+  const response = await apiClient('/api/graphs/generate/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || 'Failed to generate graph from prompt');
+  }
+  
+  return response.json();
+}

@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -9,12 +10,22 @@ class Tool(models.Model):
 
     class ToolType(models.TextChoices):
         WEB_SEARCH = 'web_search', 'Web Search'
-        # Add more later: CALCULATOR, DATABASE, API_CALL, etc.
+        DISCORD_WEBHOOK = 'discord_webhook', 'Discord Webhook'
+        SLACK_WEBHOOK = 'slack_webhook', 'Slack Webhook'
+        TEAMS_WEBHOOK = 'teams_webhook', 'Microsoft Teams Webhook'
+        GMAIL = 'gmail', 'Google Mail'
 
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE,
+        related_name="tools",
+        null=True,
+        blank=True
+    )
+    
     # Core fields
     name = models.CharField(
         max_length=100,
-        unique=True,
         help_text="Unique identifier for the tool (e.g., 'tavily_search', 'brave_search')"
     )
     description = models.TextField(
@@ -25,8 +36,6 @@ class Tool(models.Model):
         choices=ToolType.choices,
         default=ToolType.WEB_SEARCH
     )
-
-    # Configuration for the tool (API keys, settings, etc.)
     config = models.JSONField(
         default=dict,
         blank=True,
@@ -40,6 +49,7 @@ class Tool(models.Model):
 
     class Meta:
         ordering = ['name']
+        unique_together = ('user', 'name')
 
     def __str__(self):
         return f"{self.name} ({self.get_tool_type_display()})"

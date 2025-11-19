@@ -64,3 +64,5 @@ class User(AbstractBaseUser, PermissionsMixin):
     def get_short_name(self):
         """Return the short name for the user"""
         return f"{self.first_name} {self.last_name[0]}.".strip() if self.last_name else self.first_name
+    
+

@@ -46,14 +46,14 @@ const data = {
       icon: IconDashboard,
     },
     {
-      title: "Analytics",
-      url: "/dashboard/analytics",
-      icon: IconChartBar,
-    },
-    {
       title: "Projects",
       url: "/dashboard/projects",
       icon: IconFolder,
+    },
+    {
+      title: "Connections",
+      url: "/dashboard/connections",
+      icon: IconUsers,
     },
   ],
   navClouds: [
@@ -110,33 +110,9 @@ const data = {
       url: "#",
       icon: IconSettings,
     },
-    {
-      title: "Get Help",
-      url: "#",
-      icon: IconHelp,
-    },
-    {
-      title: "Search",
-      url: "#",
-      icon: IconSearch,
-    },
   ],
   documents: [
-    {
-      name: "Data Library",
-      url: "#",
-      icon: IconDatabase,
-    },
-    {
-      name: "Reports",
-      url: "#",
-      icon: IconReport,
-    },
-    {
-      name: "Word Assistant",
-      url: "#",
-      icon: IconFileWord,
-    },
+    
   ],
 }
 

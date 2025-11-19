@@ -1,30 +1,35 @@
-from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import Agent
 from .serializers import AgentSerializer, AgentDetailSerializer
-
+from rest_framework import viewsets, permissions, views, response, status
+from .serializers import AgentSerializer, AgentGenerateConfigSerializer
+from .services.generator import generate_agent_config_from_prompt
+from django.db.models import Q
 
 class AgentViewSet(viewsets.ModelViewSet):
     """
-    API endpoint for managing agents.
+    API endpoint for managing a user's Agent library.
 
-    list: Get all agents (filtered by user's graphs)
-    retrieve: Get a specific agent with full tool details
-    create: Create a new agent
-    update: Update an agent
-    partial_update: Partially update an agent
-    destroy: Delete an agent
+    list: Get all agents owned by the user, plus global system agents.
+    retrieve: Get a specific agent.
+    create: Create a new agent owned by the user.
+    update: Update an agent owned by the user.
+    partial_update: Partially update an agent owned by the user.
+    destroy: Delete an agent owned by the user.
     """
-    queryset = Agent.objects.all()
     serializer_class = AgentSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         """
-        Filter agents to only those in graphs owned by the current user.
+        This view should return a list of all agents
+        for the currently authenticated user, PLUS global (system) agents.
         """
-        return Agent.objects.filter(project__owner=self.request.user)
+        user = self.request.user
+        return Agent.objects.filter(
+            (Q(user=user) | Q(user__isnull=True))
+        )
 
     def get_serializer_class(self):
         """Use detailed serializer for retrieve actions."""
@@ -34,43 +39,54 @@ class AgentViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """
-        Create a new agent. Ensure the project belongs to the current user.
+        Assign the owner of the agent to the currently logged-in user.
         """
-        project = serializer.validated_data.get('project')
-
-        # Check if user owns the project
-        if project.owner != self.request.user:
-            raise permissions.PermissionDenied(
-                "You can only create agents in your own projects."
-            )
-
-        serializer.save()
+        serializer.save(user=self.request.user)
 
     def perform_update(self, serializer):
         """
-        Update an agent. Ensure the project belongs to the current user.
+        Update an agent. Ensure the user owns this agent.
         """
-        if serializer.instance.project.owner != self.request.user:
+        # Check if the agent being updated is owned by the user
+        if serializer.instance.user != self.request.user:
             raise permissions.PermissionDenied(
-                "You can only update agents in your own projects."
+                "You can only update your own agents."
             )
-
         serializer.save()
 
-    @action(detail=False, methods=['get'])
-    def by_project(self, request):
+    def perform_destroy(self, instance):
         """
-        Get all agents for a specific project.
-        Query params: project_id
+        Delete an agent. Ensure the user owns this agent.
         """
-        project_id = request.query_params.get('project_id')
-
-        if not project_id:
-            return Response(
-                {'error': 'project_id query parameter is required'},
-                status=status.HTTP_400_BAD_REQUEST
+        # Check if the agent being deleted is owned by the user
+        if instance.user != self.request.user:
+            raise permissions.PermissionDenied(
+                "You can only delete your own agents. System agents are protected."
             )
+        instance.delete()
 
-        agents = self.get_queryset().filter(project_id=project_id)
-        serializer = self.get_serializer(agents, many=True)
-        return Response(serializer.data)
+class AgentGenerateConfigView(views.APIView):
+    """
+    A view that generates an Agent's configuration (name, description, prompt)
+    from a natural language prompt using an LLM.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = AgentGenerateConfigSerializer(data=request.data)
+        if not serializer.is_valid():
+            return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        prompt = serializer.validated_data['prompt']
+        user = request.user
+
+        try:
+            generated_config = generate_agent_config_from_prompt(prompt, user)
+            
+            return response.Response(generated_config, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return response.Response(
+                {"error": "Failed to generate agent configuration.", "detail": str(e)}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

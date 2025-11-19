@@ -1,445 +1,346 @@
 "use client"
 
-import { use, useState, useCallback, useEffect, memo, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-
-import { SiteHeader } from "@/components/site-header";
-import { type Project } from "@/lib/types";
-import { getProjectById, updateProjectGraph } from '@/lib/api';
+import { use, useState, useRef, useCallback, useEffect } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  ApiAgentNode,
+  ApiToolNode,
+  getAgents,
+  getTools,
+  getProjectById,
+  RunGraphResult,
+  generateGraphFromPrompt
+} from '@/lib/api';
+import {
+  type Project,
+  GraphGenerateResponse,
+  AgentNodeData,
+  ToolNodeData,
+  ChatMessage
+} from '@/lib/types';
 
 import {
-  Background,
-  Controls,
-  Panel,
-  MiniMap,
-  ReactFlow,
-  addEdge,
-  applyEdgeChanges,
-  applyNodeChanges,
+  ReactFlowInstance,
   Node,
   Edge,
-  Handle,
-  Position,
-  NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from "@/components/ui/textarea";
+import { SiteHeader } from "@/components/site-header";
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { XIcon, CheckIcon, ChevronsUpDown } from 'lucide-react';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { cn } from '@/lib/utils';
+import { toast } from "sonner";
 
-// --- TYPE DEFINITIONS ---
+// --- Local Imports ---
+import AgentNode from './components/AgentNode';
+import ToolNode from './components/ToolNode';
+import { AddAgentNodeDialog } from './components/AddAgentNodeDialog';
+import { AddToolNodeDialog } from './components/AddToolNodeDialog';
+import { useProjectGraph } from './hooks/useProjectGraph';
+import { Toolbox } from './components/ToolBox'; // <-- Your new component
+import { Canvas } from './components/Canvas';   // <-- Your new component
+import { ControlPanel } from './components/ControlPanel'; // <-- Your new component
 
-type AsyncProps<T> = T | Promise<T>;
-
-enum AgentProvider { OPENAI = 'openai', ANTHROPIC = 'anthropic', GOOGLE = 'google', CUSTOM = 'custom' }
-enum AgentRole { GENERAL = 'general', SUPERVISOR = 'supervisor' }
-enum ToolType { WEB_SEARCH = 'web_search', CUSTOM = 'custom' }
-
-interface AgentNodeData {
-  name: string;
-  role: AgentRole;
-  provider: AgentProvider;
-  model: string;
-  system_instruction_prompt: string;
-  tools: string[]; // An array of tool node IDs
-  updateNodeData: (nodeId: string, data: Partial<AgentNodeData>) => void;
-  deleteNode: (nodeId: string) => void;
-  allNodes: Node[]; // Pass all nodes to allow tool selection
-}
-
-interface ToolNodeData {
-  name: string;
-  description: string;
-  tool_type: ToolType;
-  updateNodeData: (nodeId: string, data: Partial<ToolNodeData>) => void;
-  deleteNode: (nodeId: string) => void;
-}
-
-
-// --- CUSTOM NODE COMPONENTS ---
-
-const AgentNode = memo(({ id, data }: NodeProps<AgentNodeData>) => {
-  const { name, role, provider, model, system_instruction_prompt, tools, updateNodeData, deleteNode, allNodes } = data;
-
-  const handleInputChange = (field: keyof Omit<AgentNodeData, 'tools' | 'allNodes' | 'updateNodeData' | 'deleteNode'>, value: string) => {
-    updateNodeData(id, { [field]: value });
-  };
-  
-  // The list of available tools now maps the display name (label) to the stable ID (value)
-  const availableTools = useMemo(() => 
-    allNodes.filter(node => node.type === 'tool').map(node => ({
-      value: node.id,
-      label: node.data.name,
-    })),
-    [allNodes]
-  );
-  
-  // This function now toggles the presence of the tool's ID in the tools array
-  const handleToolToggle = (toolId: string) => {
-    const newTools = tools.includes(toolId)
-      ? tools.filter(t => t !== toolId)
-      : [...tools, toolId];
-    updateNodeData(id, { tools: newTools });
-  };
-
-  return (
-    <Card className="w-80 shadow-lg border-blue-500 border-2 relative group">
-      <Button onClick={() => deleteNode(id)} variant="ghost" size="icon" className="absolute -top-3 -right-3 h-6 w-6 rounded-full bg-destructive text-destructive-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-        <XIcon className="h-4 w-4" />
-      </Button>
-      <Handle type="target" position={Position.Top} />
-      <CardHeader className="bg-muted p-3">
-        <CardTitle className="text-md">
-          <Input 
-            value={name}
-            onChange={(e) => handleInputChange('name', e.target.value)}
-            placeholder="Agent Name"
-            className="text-md font-bold border-none !ring-0 !shadow-none p-0 h-auto"
-          />
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="p-3 grid gap-2 text-sm">
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <Label>Role</Label>
-            <Select value={role} onValueChange={(value: AgentRole) => handleInputChange('role', value)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {Object.values(AgentRole).map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Provider</Label>
-            <Select value={provider} onValueChange={(value: AgentProvider) => handleInputChange('provider', value)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {Object.values(AgentProvider).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <div>
-          <Label>Model</Label>
-          <Input 
-            value={model}
-            onChange={(e) => handleInputChange('model', e.target.value)}
-            placeholder="e.g., gpt-4o"
-          />
-        </div>
-        <div>
-          <Label>System Prompt</Label>
-          <Textarea 
-            value={system_instruction_prompt}
-            onChange={(e) => handleInputChange('system_instruction_prompt', e.target.value)}
-            placeholder="You are a helpful assistant..."
-            rows={4}
-          />
-        </div>
-        <div>
-          <Label>Tools</Label>
-            <Popover>
-                <PopoverTrigger asChild>
-                    <Button variant="outline" role="combobox" className="w-full justify-between">
-                        <span className="truncate">
-                            {tools.length > 0 ? `${tools.length} selected` : 'Select tools...'}
-                        </span>
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                    <Command>
-                        <CommandInput placeholder="Search tools..." />
-                        <CommandList>
-                            <CommandEmpty>No tools found.</CommandEmpty>
-                            <CommandGroup>
-                                {availableTools.map((tool) => (
-                                    <CommandItem
-                                        key={tool.value} // Key is now the stable ID
-                                        onSelect={() => handleToolToggle(tool.value)} // Handler uses the ID
-                                    >
-                                        <CheckIcon
-                                            className={cn(
-                                                "mr-2 h-4 w-4",
-                                                // Check for inclusion is now based on the ID
-                                                tools.includes(tool.value) ? "opacity-100" : "opacity-0"
-                                            )}
-                                        />
-                                        {tool.label} {/* Display name is just for the UI */}
-                                    </CommandItem>
-                                ))}
-                            </CommandGroup>
-                        </CommandList>
-                    </Command>
-                </PopoverContent>
-            </Popover>
-        </div>
-      </CardContent>
-      <Handle type="source" position={Position.Bottom} />
-    </Card>
-  );
-});
-AgentNode.displayName = 'AgentNode';
-
-const ToolNode = memo(({ id, data }: NodeProps<ToolNodeData>) => {
-  const { name, description, tool_type, updateNodeData, deleteNode } = data;
-  
-  return (
-    <Card className="w-72 shadow-lg border-green-500 border-2 relative group">
-      <Button onClick={() => deleteNode(id)} variant="ghost" size="icon" className="absolute -top-3 -right-3 h-6 w-6 rounded-full bg-destructive text-destructive-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-        <XIcon className="h-4 w-4" />
-      </Button>
-      <Handle type="target" position={Position.Top} />
-      <CardHeader className="bg-muted p-3">
-        <CardTitle className="text-md">
-          <Input 
-            value={name}
-            onChange={(e) => updateNodeData(id, { name: e.target.value })}
-            placeholder="Tool Name"
-            className="text-md font-bold border-none !ring-0 !shadow-none p-0 h-auto"
-          />
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="p-3 grid gap-2 text-sm">
-        <div>
-            <Label>Tool Type</Label>
-            <Select value={tool_type} onValueChange={(value: ToolType) => updateNodeData(id, { tool_type: value })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {Object.values(ToolType).map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-              </SelectContent>
-            </Select>
-        </div>
-        <div>
-          <Label>Description</Label>
-          <Textarea 
-            value={description}
-            onChange={(e) => updateNodeData(id, { description: e.target.value })}
-            placeholder="Describes what this tool does..."
-            rows={3}
-          />
-        </div>
-      </CardContent>
-      <Handle type="source" position={Position.Bottom} />
-    </Card>
-  );
-});
-ToolNode.displayName = 'ToolNode';
-
+// Define node types for React Flow
 const nodeTypes = { agent: AgentNode, tool: ToolNode };
 
-
-// --- SIDEBAR COMPONENT ---
-
-const CanvasSidebar = ({ onAddAgentNode, onAddToolNode }: { onAddAgentNode: () => void; onAddToolNode: () => void; }) => {
-  return (
-    <aside className="w-64 bg-background border-r p-4 flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Nodes</h2>
-      <Button onClick={onAddAgentNode} variant="outline">Add Agent</Button>
-      <Button onClick={onAddToolNode} variant="outline">Add Tool</Button>
-    </aside>
-  );
-};
-
-
-// --- MAIN PAGE COMPONENT ---
+type AsyncProps<T> = T | Promise<T>;
 
 export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ projectId: string }> }) {
   const resolvedParams = use(params);
   const { projectId } = resolvedParams;
-  const queryClient = useQueryClient();
 
-  const [nodes, setNodes] = useState<Node<any, string | undefined>[]>([]);
-  const [edges, setEdges] = useState<Edge[]>([]);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
 
-  // --- Data Fetching and Saving ---
-  const { data: project, isLoading, error } = useQuery<Project, Error>({
+  // --- Layout State ---
+  const [isToolboxOpen, setIsToolboxOpen] = useState(true);
+  const [isControlPanelOpen, setIsControlPanelOpen] = useState(true);
+
+  // --- STATE FOR RUNNING GRAPH ---
+  const [graphInput, setGraphInput] = useState("");
+  const [logs, setLogs] = useState<any[]>([]); // Store streaming logs
+  const [finalOutput, setFinalOutput] = useState<string | null>(null); // Store final output
+
+  // --- STATE FOR CHAT GENERATION ---
+  const [chatInput, setChatInput] = useState("");
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+
+  // --- Data Fetching ---
+  const { data: project, isLoading: isLoadingProject, error: projectError } = useQuery<Project, Error>({
     queryKey: ['project', projectId],
     queryFn: () => getProjectById(projectId),
   });
 
-  const { mutate: saveProject, isPending: isSaving } = useMutation({
-    // **THE FIX**: The mutation function now cleans the data before sending.
-    mutationFn: () => {
-      // Create a "clean" version of nodes for serialization.
-      const nodesToSave = nodes.map(node => {
-        // Destructure the data to remove frontend-only properties
-        const { updateNodeData, deleteNode, allNodes, ...restData } = node.data;
-        return { ...node, data: restData };
-      });
+  const { data: agents, isLoading: isLoadingAgents, error: agentsError } = useQuery<ApiAgentNode[], Error>({
+    queryKey: ['agents'],
+    queryFn: () => getAgents(),
+  });
 
-      return updateProjectGraph({ projectId, graphData: { nodes: nodesToSave, edges } });
+  const { data: tools, isLoading: isLoadingTools, error: toolsError } = useQuery<ApiToolNode[], Error>({
+    queryKey: ['tools'],
+    queryFn: () => getTools(),
+  });
+
+  // --- Graph State Management ---
+  const {
+    nodes,
+    edges,
+    onNodesChange,
+    onEdgesChange,
+    onConnect,
+    handleCreateAgentNode,
+    handleCreateToolNode,
+    handleSaveProject,
+    isSaving,
+    runGraphStream, // Use the streaming hook
+    isExecuting,
+    isAddToolDialogOpen,
+    setIsAddToolDialogOpen,
+    isAddAgentDialogOpen,
+    setIsAddAgentDialogOpen,
+    setNodes,
+    setEdges,
+    updateNodeData,
+    deleteNode,
+    isCreatingAgent,
+    isCreatingTool,
+  } = useProjectGraph(projectId);
+
+  // --- Mutation for graph generation (NLP-to-Workflow) ---
+  const { mutate: generateGraph, isPending: isGenerating } = useMutation({
+    mutationFn: generateGraphFromPrompt,
+    onSuccess: (data: GraphGenerateResponse) => {
+      toast.success("Workflow Updated!", { description: data.explanation });
+      setChatHistory(prev => [...prev, { role: 'ai', content: data.explanation }]);
+
+      const nodesWithUpdaters = data.graph.nodes.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          updateNodeData,
+          deleteNode,
+          allNodes: data.graph.nodes
+        }
+      }));
+      setNodes(nodesWithUpdaters);
+      setEdges(data.graph.edges);
+
+      if (reactFlowInstance) {
+        reactFlowInstance.fitView();
+      }
     },
-    onSuccess: (updatedProject) => {
-      console.log('Project saved successfully!');
-      // Update the cache with the full data from the server response
-      queryClient.setQueryData(['project', projectId], updatedProject);
-    },
-    onError: (err) => {
-      console.error('Failed to save project:', err);
-      // Here you could add a user-facing error message (e.g., a toast notification)
+    onError: (err: Error) => {
+      const errorMessage = err.message || "An unknown error occurred.";
+      toast.error("Generation Failed", { description: errorMessage });
+      setChatHistory(prev => [...prev, { role: 'ai', content: `Sorry, I ran into an error: ${errorMessage}` }]);
     },
   });
 
-  // --- Node State Management Callbacks ---
-  const updateNodeData = useCallback((nodeId: string, newData: Partial<AgentNodeData | ToolNodeData>) => {
-    setNodes((prevNodes) =>
-      prevNodes.map((node) =>
-        node.id === nodeId ? { ...node, data: { ...node.data, ...newData } } : node
-      )
-    );
-  }, [setNodes]);
+  // --- Handlers ---
+  const handleChatSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const prompt = chatInput.trim();
+    if (!prompt) return;
+    setChatHistory(prev => [...prev, { role: 'user', content: prompt }]);
+    setChatInput("");
+    const cleanNodes = nodes.map(node => {
+      const { updateNodeData, deleteNode, allNodes, ...restData } = node.data;
+      return { ...node, data: restData };
+    });
+    const current_graph_data = { nodes: cleanNodes, edges: edges };
+    generateGraph({ prompt, current_graph_data });
+  };
 
-  const deleteNode = useCallback((nodeIdToDelete: string) => {
-    setNodes((prevNodes) => {
-      const nodeToDelete = prevNodes.find(n => n.id === nodeIdToDelete);
-      let updatedNodes = prevNodes.filter((node) => node.id !== nodeIdToDelete);
+  const handleSaveAndRun = () => {
+    setLogs([]); // Clear previous logs
+    setFinalOutput(null); // Clear previous output
+    handleSaveProject(undefined, {
+      onSuccess: (savedProject) => {
+        toast.info("Project saved. Starting execution...");
 
-      if (nodeToDelete && nodeToDelete.type === 'tool') {
-        const deletedToolId = nodeToDelete.id;
-        updatedNodes = updatedNodes.map(node => {
-          if (node.type === 'agent' && node.data.tools?.includes(deletedToolId)) {
-            const newTools = node.data.tools.filter((toolId: string) => toolId !== deletedToolId);
-            return { ...node, data: { ...node.data, tools: newTools } };
+        runGraphStream(
+          { projectId, input: graphInput },
+          {
+            onMessage: (msg: any) => {
+              setLogs(prev => [...prev, msg]);
+              // Check for final output in completion message
+              if (msg.type === 'complete' && msg.final_output) {
+                setFinalOutput(msg.final_output);
+              }
+            },
+            onComplete: () => {
+              toast.success("Graph execution completed.");
+            },
+            onError: (err: any) => {
+              toast.error("Graph execution failed.");
+              setLogs(prev => [...prev, { type: 'error', error: err.message || "Unknown error" }]);
+            }
           }
-          return node;
-        });
+        );
+      },
+      onError: (saveError: Error) => {
+        toast.error("Failed to save project.");
       }
-      return updatedNodes;
+    });
+  };
+
+  const onAgentDragStart = useCallback((event: React.DragEvent, agent: ApiAgentNode) => {
+    const nodeData = { type: 'agent', data: agent };
+    event.dataTransfer.setData('application/reactflow', JSON.stringify(nodeData));
+    event.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const onToolDragStart = useCallback((event: React.DragEvent, tool: ApiToolNode) => {
+    const nodeData = { type: 'tool', data: tool };
+    event.dataTransfer.setData('application/reactflow', JSON.stringify(nodeData));
+    event.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const onDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    const nodeDataString = event.dataTransfer.getData('application/reactflow');
+    if (!nodeDataString || !reactFlowInstance) return;
+
+    const { type, data } = JSON.parse(nodeDataString);
+    const position = reactFlowInstance.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY
     });
 
-    setEdges((prevEdges) =>
-      prevEdges.filter((edge) => edge.source !== nodeIdToDelete && edge.target !== nodeIdToDelete)
-    );
-  }, [setNodes, setEdges]);
-  
-  
-  // Effect to load initial graph data from the server
-  useEffect(() => {
-    if (project?.graph_data?.nodes) {
-      const initialNodes = project.graph_data.nodes;
-      // Inject the frontend-only callbacks and properties into the nodes from the server
-      const nodesWithUpdaters = initialNodes.map(node => ({
-        ...node,
-        data: { ...node.data, updateNodeData, deleteNode, allNodes: initialNodes }
-      }));
-      setNodes(nodesWithUpdaters);
-      setEdges(project.graph_data.edges || []);
-    }
-  }, [project, updateNodeData, deleteNode]);
-
-  // This effect ensures that every node has the most up-to-date list of all other nodes.
-  const nodeDependencies = useMemo(() => 
-    JSON.stringify(nodes.map(n => ({ id: n.id, name: n.data.name }))), 
-    [nodes]
-  );
-
-  useEffect(() => {
-    if (nodes.length > 0) {
-      setNodes(currentNodes =>
-        currentNodes.map(n => ({
-          ...n,
-          data: {
-            ...n.data,
-            allNodes: currentNodes,
-          }
-        }))
-      );
-    }
-  }, [nodeDependencies]);
-
-
-  // --- UI Action Handlers ---
-  const addAgentNode = () => {
-    const newNodeId = `agent_${Date.now()}`;
-    const newNode: Node<AgentNodeData> = {
-      id: newNodeId,
-      type: 'agent',
-      position: { x: Math.random() * 400, y: Math.random() * 400 },
+    const newNode: Node = {
+      id: `${type}_instance_${crypto.randomUUID()}`,
+      type,
+      position,
       data: {
-        name: 'New Agent',
-        role: AgentRole.GENERAL,
-        provider: AgentProvider.OPENAI,
-        model: 'gpt-4o',
-        system_instruction_prompt: 'You are a helpful AI assistant.',
-        tools: [],
+        ...data,
         updateNodeData,
         deleteNode,
-        allNodes: [], // Will be populated by the useEffect
-      },
+        allNodes: nodes,
+      }
     };
-    setNodes((nds) => [...nds, newNode]);
-  };
-  
-  const addToolNode = () => {
-    const newNodeId = `tool_${Date.now()}`;
-    const newNode: Node<ToolNodeData> = {
-      id: newNodeId,
-      type: 'tool',
-      position: { x: Math.random() * 400, y: Math.random() * 400 },
-      data: {
-        name: 'New Tool',
-        description: 'A tool for performing a specific action.',
-        tool_type: ToolType.CUSTOM,
-        updateNodeData,
-        deleteNode,
-      },
-    };
-    setNodes((nds) => [...nds, newNode]);
-  };
-
-  const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), [setNodes]);
-  const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), [setEdges]);
-  const onConnect = useCallback((params) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
+    onNodesChange([{ type: 'add', item: newNode }]);
+  }, [reactFlowInstance, onNodesChange, updateNodeData, deleteNode, nodes]);
 
   // --- Render Logic ---
-  if (isLoading) { 
+  const isLoading = isLoadingProject || isLoadingAgents || isLoadingTools;
+  const pageError = projectError || agentsError || toolsError;
+
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
         <LoadingSpinner /><p className="ml-4">Loading Project Canvas...</p>
       </div>
     );
   }
-  if (error) { 
-    return <div className="p-8 text-red-500">Error: Failed to load project. {error.message}</div>;
+  if (pageError) {
+    return <div className="p-8 text-red-500">Error: {pageError.message}</div>;
   }
-  
+
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="h-screen w-screen flex flex-col bg-neutral-50 overflow-hidden">
       <SiteHeader name={`Canvas: ${project?.name || '...'}`} />
-      <div className="flex flex-grow">
-        <CanvasSidebar onAddAgentNode={addAgentNode} onAddToolNode={addToolNode} />
-        <main className="flex-grow">
-          <ReactFlow
+
+      {/* --- 2. Pass the isPending prop to the dialogs --- */}
+      <AddToolNodeDialog
+        isOpen={isAddToolDialogOpen}
+        onOpenChange={setIsAddToolDialogOpen}
+        onSubmit={handleCreateToolNode}
+        isPending={isCreatingTool}
+      />
+      <AddAgentNodeDialog
+        isOpen={isAddAgentDialogOpen}
+        onOpenChange={setIsAddAgentDialogOpen}
+        onSubmit={handleCreateAgentNode}
+        isPending={isCreatingAgent}
+      />
+
+      {/* Main 3-Column Layout */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Left Sidebar - Toolbox */}
+        <div
+          className={`flex-shrink-0 transition-all duration-300 ease-in-out bg-white ${isToolboxOpen ? 'w-64' : 'w-0'
+            }`}
+        >
+          <Toolbox
+            isOpen={isToolboxOpen}
+            agents={agents || []}
+            tools={tools || []}
+            onAddAgentNode={() => setIsAddAgentDialogOpen(true)}
+            onAddToolNode={() => setIsAddToolDialogOpen(true)}
+            onAgentDragStart={onAgentDragStart}
+            onToolDragStart={onToolDragStart}
+          />
+        </div>
+
+        {/* Toggle Button for Toolbox */}
+        <button
+          onClick={() => setIsToolboxOpen(!isToolboxOpen)}
+          className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white border border-neutral-200 rounded-r-lg p-2 hover:bg-neutral-50 transition-colors shadow-sm"
+          style={{ transform: `translateX(${isToolboxOpen ? '256px' : '0px'})` }}
+        >
+          {isToolboxOpen ? (
+            <ChevronLeft className="w-4 h-4 text-neutral-600" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-neutral-600" />
+          )}
+        </button>
+
+        {/* Central Canvas */}
+        <div className="flex-1 flex flex-col min-w-0 h-full">
+          <Canvas
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
-            fitView
-          >
-            <Panel position="top-right">
-              <Button onClick={() => saveProject()} disabled={isSaving}>
-                {isSaving ? 'Saving...' : 'Save Project'}
-              </Button>
-            </Panel>
-            <Controls />
-            <MiniMap />
-            <Background variant="dots" gap={12} size={1} />
-          </ReactFlow>
-        </main>
+            onInit={setReactFlowInstance}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
+          />
+        </div>
+
+        {/* Toggle Button for Control Panel */}
+        <button
+          onClick={() => setIsControlPanelOpen(!isControlPanelOpen)}
+          className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white border border-neutral-200 rounded-l-lg p-2 hover:bg-neutral-50 transition-colors shadow-sm"
+          style={{ transform: `translateX(${isControlPanelOpen ? '-384px' : '0px'})` }}
+        >
+          {isControlPanelOpen ? (
+            <ChevronRight className="w-4 h-4 text-neutral-600" />
+          ) : (
+            <ChevronLeft className="w-4 h-4 text-neutral-600" />
+          )}
+        </button>
+
+        {/* Right Sidebar - Control Panel */}
+        <div
+          className={`flex-shrink-0 transition-all duration-300 ease-in-out bg-white ${isControlPanelOpen ? 'w-96' : 'w-0'
+            }`}
+        >
+          <ControlPanel
+            isOpen={isControlPanelOpen}
+            chatHistory={chatHistory}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            handleChatSubmit={handleChatSubmit}
+            isGenerating={isGenerating}
+            graphInput={graphInput}
+            setGraphInput={setGraphInput}
+            logs={logs}
+            handleSaveProject={() => handleSaveProject()}
+            handleSaveAndRun={handleSaveAndRun}
+            isSaving={isSaving}
+            isExecuting={isExecuting}
+            finalOutput={finalOutput}
+          />
+        </div>
       </div>
     </div>
   );
 }
-
