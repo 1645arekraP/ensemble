@@ -430,10 +430,26 @@ class GraphRunner:
                 execution_log.is_successful = True
                 execution_log.save()
 
+            # Extract final output
+            final_output = ""
+            if final_state:
+                # final_state is a dict of the updated state from the last node
+                messages = final_state.get('messages', [])
+                if messages:
+                    last_msg = messages[-1]
+                    # Handle both dict and object (Pydantic) formats
+                    if isinstance(last_msg, dict):
+                        final_output = last_msg.get('content', '')
+                    elif hasattr(last_msg, 'content'):
+                        final_output = last_msg.content
+                    else:
+                        final_output = str(last_msg)
+
             yield json.dumps({
                 "type": "complete",
                 "status": "success",
-                "message": "Graph execution completed."
+                "message": "Graph execution completed.",
+                "final_output": str(final_output)
             }) + "\n"
 
         except Exception as e:

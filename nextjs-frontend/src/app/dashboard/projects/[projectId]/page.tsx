@@ -59,6 +59,7 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
   // --- STATE FOR RUNNING GRAPH ---
   const [graphInput, setGraphInput] = useState("");
   const [logs, setLogs] = useState<any[]>([]); // Store streaming logs
+  const [finalOutput, setFinalOutput] = useState<string | null>(null); // Store final output
 
   // --- STATE FOR CHAT GENERATION ---
   const [chatInput, setChatInput] = useState("");
@@ -152,6 +153,7 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
 
   const handleSaveAndRun = () => {
     setLogs([]); // Clear previous logs
+    setFinalOutput(null); // Clear previous output
     handleSaveProject(undefined, {
       onSuccess: (savedProject) => {
         toast.info("Project saved. Starting execution...");
@@ -161,6 +163,10 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
           {
             onMessage: (msg: any) => {
               setLogs(prev => [...prev, msg]);
+              // Check for final output in completion message
+              if (msg.type === 'complete' && msg.final_output) {
+                setFinalOutput(msg.final_output);
+              }
             },
             onComplete: () => {
               toast.success("Graph execution completed.");
@@ -331,6 +337,7 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
             handleSaveAndRun={handleSaveAndRun}
             isSaving={isSaving}
             isExecuting={isExecuting}
+            finalOutput={finalOutput}
           />
         </div>
       </div>

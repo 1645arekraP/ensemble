@@ -27,6 +27,7 @@ interface ControlPanelProps {
   handleSaveAndRun: () => void;
   isSaving: boolean;
   isExecuting: boolean;
+  finalOutput?: string | null;
 }
 
 export function ControlPanel({
@@ -43,6 +44,7 @@ export function ControlPanel({
   handleSaveAndRun,
   isSaving,
   isExecuting,
+  finalOutput,
 }: ControlPanelProps) {
   const [activeTab, setActiveTab] = useState<'chat' | 'run'>('run');
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -180,6 +182,20 @@ export function ControlPanel({
                 )}
               </div>
             </div>
+
+            {/* Final Output Section */}
+            {finalOutput && (
+              <div className="flex-shrink-0 border rounded-lg overflow-hidden bg-green-50 border-green-200 shadow-sm">
+                <div className="flex items-center gap-2 px-3 py-2 bg-green-100 border-b border-green-200">
+                  <Activity className="w-3 h-3 text-green-700" />
+                  <span className="text-xs font-bold text-green-800 uppercase tracking-wider">Final Output</span>
+                </div>
+                <div className="p-3 max-h-[150px] overflow-y-auto text-sm text-neutral-800 whitespace-pre-wrap">
+                  {finalOutput}
+                </div>
+              </div>
+            )}
+
           </div>
         )}
 

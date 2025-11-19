@@ -425,6 +425,14 @@ class AgentCompiler:
         completed_tasks = state.completed_tasks if isinstance(state, BaseModel) else state.get('completed_tasks', [])
         if completed_tasks:
             context_parts.append(f"\nCompleted Tasks: {', '.join(completed_tasks)}")
+            
+        # Add current task/tool output to the context
+        current_task = state.current_task if isinstance(state, BaseModel) else state.get('current_task')
+        if current_task:
+            # Avoid duplicating if it's the same as the original request
+            original_request = hydrated_messages[0].content if hydrated_messages and isinstance(hydrated_messages[0], HumanMessage) else ""
+            if current_task != original_request:
+                context_parts.append(f"\n**Current Context / Tool Output**:\n{current_task}")
         
         return "\n".join(context_parts)
     

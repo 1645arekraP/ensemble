@@ -61,6 +61,7 @@ def read_gmail_inbox(state: dict, config: dict) -> dict:
                 email_summaries.append(f"From: {sender}\nSubject: {subject}\nSnippet: {snippet}\n---")
         
         output = "\n".join(email_summaries)
+        print(output)
 
     except UserCredential.DoesNotExist:
         logger.warning(f"read_gmail_inbox: No Gmail credential found for user {user.id}")
