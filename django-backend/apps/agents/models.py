@@ -37,6 +37,7 @@ class Agent(models.Model):
     
     # --- Associated Tools ---
     tools = models.ManyToManyField(Tool, blank=True, related_name='agents')
+    mcp = models.ManyToManyField('tools.mcp', blank=True, related_name='agents')
 
     class Meta:
         unique_together = ('project', 'name')

@@ -79,6 +79,17 @@ class AgentCompiler:
     def _load_agent_tools(self, agent: Agent):
         """Load and configure tools for the agent."""
         # Get the agent's tools and convert them to LangChain tools
+        
+        # Move this logic to ToolRegistry
+        if agent.mcp.exists():
+            mcp = agent.mcp.first()
+            client = {
+                f"{mcp.name}": {
+                    "transport": "streamable_http",
+                    "base_url": mcp.url
+                }
+            }
+
         return self.tool_registry.get_tools_for_agent(agent.tools.all())
     
     def compile_agent(self, agent: Agent, graph_context=None):

@@ -42,3 +42,10 @@ class ToolRegistry:
             description=tool.description,
             func=search_tool.run
         )
+    
+    def exec_tool(tool):
+        try:
+            return exec(tool.func)
+        except Exception as e:
+            # TODO: Include a stack trace maybe? Must be from tool only and not any django exceptions
+            return f"Error executing tool!\n {str(e)}"
