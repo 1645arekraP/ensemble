@@ -242,6 +242,7 @@ export const useProjectGraph = (projectId: string) => {
       project: projectId,
       ...formData,
       tools: [],
+      mcp_ids: formData.mcp_ids || [],
       metadata: {
         position: newPosition,
       },

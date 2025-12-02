@@ -12,7 +12,8 @@ import {
   NewToolNodePayload,
   AgentRole,
   AgentProvider,
-  ToolType
+  ToolType,
+  Mcp
 } from '@/lib/types';
 import { UserCredential, NewCredentialPayload } from './types';
 
@@ -186,7 +187,7 @@ export const createAgentNode = async (payload: NewAgentNodePayload): Promise<Api
   const response = await apiClient('/api/agents/', {
     method: 'POST',
     body: JSON.stringify(payload),
-  });
+  }) as Response;
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({
@@ -249,6 +250,14 @@ export async function getTools(): Promise<ApiTool[]> {
   const response = await apiClient('/api/tools/');
   if (!response.ok) {
     throw new Error('Failed to fetch tools');
+  }
+  return response.json();
+}
+
+export async function getMcps(): Promise<Mcp[]> {
+  const response = await apiClient('/api/mcps/');
+  if (!response.ok) {
+    throw new Error('Failed to fetch MCPs');
   }
   return response.json();
 }

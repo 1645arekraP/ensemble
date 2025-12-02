@@ -208,7 +208,7 @@ class AgentCompiler:
 
         return self.tool_registry.get_tools_for_agent(agent.tools.all())
     
-    def compile_agent(self, agent: Agent, graph_context=None):
+    def compile_agent(self, agent: Agent, graph_context=None, max_executions=15):
         """Compile an agent into an executable form."""
         if agent.name in self.compiled_agents:
             return self.compiled_agents[agent.name]
