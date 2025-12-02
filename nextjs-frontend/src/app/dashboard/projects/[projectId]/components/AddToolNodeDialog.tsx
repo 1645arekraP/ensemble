@@ -32,15 +32,15 @@ enum ToolType {
 interface AddToolNodeDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (formData: AddToolFormState) => void; 
+  onSubmit: (formData: AddToolFormState) => void;
   isPending: boolean; // We'll pass this from the parent
 }
 
-export const AddToolNodeDialog = ({ 
-  isOpen, 
-  onOpenChange, 
-  onSubmit, 
-  isPending 
+export const AddToolNodeDialog = ({
+  isOpen,
+  onOpenChange,
+  onSubmit,
+  isPending
 }: AddToolNodeDialogProps) => {
   const [name, setName] = useState('New Tool');
   const [description, setDescription] = useState('A new tool for my library.');
@@ -56,7 +56,7 @@ export const AddToolNodeDialog = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     let toolConfig: Record<string, any> = {};
 
     // Only set config for webhook tools
@@ -83,9 +83,9 @@ export const AddToolNodeDialog = ({
       setTimeout(resetForm, 300); // Reset after closing animation
     }
   };
-  
+
   const getConfigLabel = () => {
-    switch(toolType) {
+    switch (toolType) {
       case ToolType.DISCORD_WEBHOOK:
       case ToolType.SLACK_WEBHOOK:
       case ToolType.TEAMS_WEBHOOK:
@@ -96,11 +96,11 @@ export const AddToolNodeDialog = ({
   };
 
   // Helper to determine if the config input should be shown
-  const showConfigInput = 
+  const showConfigInput =
     toolType === ToolType.DISCORD_WEBHOOK ||
     toolType === ToolType.SLACK_WEBHOOK ||
     toolType === ToolType.TEAMS_WEBHOOK;
-    
+
   // Helper to determine if auth is handled by Connections page
   const authHandledByConnections =
     toolType === ToolType.WEB_SEARCH ||
@@ -116,10 +116,10 @@ export const AddToolNodeDialog = ({
             Add a new tool to your personal library. It will then be available in the sidebar.
           </DialogDescription>
         </DialogHeader>
-        
+
         {/* --- THIS IS THE NEW, CLEANER LAYOUT --- */}
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
-          
+
           <div className="space-y-2">
             <Label htmlFor="tool-name">Name</Label>
             <Input
@@ -154,13 +154,14 @@ export const AddToolNodeDialog = ({
                 <SelectItem value={ToolType.DISCORD_WEBHOOK}>Discord Webhook</SelectItem>
                 <SelectItem value={ToolType.SLACK_WEBHOOK}>Slack Webhook</SelectItem>
                 <SelectItem value={ToolType.TEAMS_WEBHOOK}>Microsoft Teams Webhook</SelectItem>
+                <SelectItem value={ToolType.POSTGRES}>PostgreSQL Database</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          
+
           {/* Conditional Input for Webhook URL */}
           {showConfigInput && (
-             <div className="space-y-2">
+            <div className="space-y-2">
               <Label htmlFor="tool-config">{getConfigLabel()}</Label>
               <Input
                 id="tool-config"
@@ -171,7 +172,7 @@ export const AddToolNodeDialog = ({
               />
             </div>
           )}
-          
+
           {/* Helper text for OAuth/Credential tools */}
           {authHandledByConnections && (
             <p className="text-xs text-muted-foreground text-center p-2">

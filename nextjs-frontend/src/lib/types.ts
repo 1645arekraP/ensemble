@@ -33,6 +33,7 @@ export interface NewAgentNodePayload {
   model: string;
   system_instruction_prompt: string;
   tools: string[];
+  mcp_ids?: number[];
   metadata: {
     position: { x: number; y: number };
   };
@@ -80,6 +81,7 @@ export interface AddAgentFormState {
   system_instruction_prompt: string;
   provider: AgentProvider;
   model: string;
+  mcp_ids?: number[];
 }
 
 export interface GraphGeneratePayload {
@@ -115,8 +117,23 @@ export enum AgentRole {
 
 export enum ToolType {
   WEB_SEARCH = 'web_search',
+<<<<<<< HEAD
+=======
+  DISCORD_WEBHOOK = 'discord_webhook',
+  SLACK_WEBHOOK = 'slack_webhook',
+  TEAMS_WEBHOOK = 'teams_webhook',
+  GMAIL = 'gmail',
+>>>>>>> e8369f541d2c0e4c3e65d66806ffe09758570647
   POSTGRES = 'postgres',
   CUSTOM = 'custom'
+}
+
+export interface Mcp {
+  id: number;
+  name: string;
+  description: string;
+  url: string;
+  created_at: string;
 }
 
 export interface BaseNodeData {

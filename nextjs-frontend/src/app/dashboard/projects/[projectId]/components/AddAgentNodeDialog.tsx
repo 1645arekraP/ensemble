@@ -1,9 +1,5 @@
-// components/AddAgentNodeDialog.tsx
-
-"use client"
-
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,8 +14,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from "@/components/ui/textarea";
-import { AddAgentFormState } from '@/lib/types';
-import { generateAgentConfig } from '@/lib/api';
+import { Checkbox } from "@/components/ui/checkbox";
+import { AddAgentFormState, Mcp } from '@/lib/types';
+import { generateAgentConfig, getMcps } from '@/lib/api';
 import { Sparkles } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { toast } from 'sonner';
@@ -41,13 +38,13 @@ enum AgentProvider {
 interface AddAgentNodeDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (formData: AddAgentFormState) => void; 
+  onSubmit: (formData: AddAgentFormState) => void;
 }
 
-export const AddAgentNodeDialog = ({ 
-  isOpen, 
-  onOpenChange, 
-  onSubmit 
+export const AddAgentNodeDialog = ({
+  isOpen,
+  onOpenChange,
+  onSubmit
 }: AddAgentNodeDialogProps) => {
   const [generationPrompt, setGenerationPrompt] = useState('');
 
@@ -55,11 +52,19 @@ export const AddAgentNodeDialog = ({
   const [name, setName] = useState('New Agent');
   const [description, setDescription] = useState('A new AI agent.');
   const [role, setRole] = useState<AgentRole>(AgentRole.GENERAL);
-  
+
   const [provider, setProvider] = useState<AgentProvider>(AgentProvider.GOOGLE);
-  const [model, setModel] = useState('gemini-2.5-flash'); 
+  const [model, setModel] = useState('gemini-2.5-flash');
+  const [selectedMcps, setSelectedMcps] = useState<number[]>([]);
 
   const [systemPrompt, setSystemPrompt] = useState('You are a helpful AI assistant.');
+
+  // Fetch available MCPs
+  const { data: mcps } = useQuery<Mcp[]>({
+    queryKey: ['mcps'],
+    queryFn: getMcps,
+    enabled: isOpen, // Only fetch when dialog is open
+  });
 
   const resetForm = () => {
     setGenerationPrompt('');
@@ -69,6 +74,7 @@ export const AddAgentNodeDialog = ({
     setProvider(AgentProvider.OPENAI); // Reset provider
     setModel('gpt-4o'); // Reset model
     setSystemPrompt('You are a helpful AI assistant.');
+    setSelectedMcps([]);
   };
 
   // --- Add the mutation for generating the config ---
@@ -93,7 +99,15 @@ export const AddAgentNodeDialog = ({
     }
     generateConfig({ prompt: generationPrompt });
   };
-  
+
+  const handleMcpToggle = (mcpId: number) => {
+    setSelectedMcps(prev =>
+      prev.includes(mcpId)
+        ? prev.filter(id => id !== mcpId)
+        : [...prev, mcpId]
+    );
+  };
+
   // This is the final "Create" button submit
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,8 +116,9 @@ export const AddAgentNodeDialog = ({
       description,
       role,
       system_instruction_prompt: systemPrompt,
-      provider, // <-- ADDED
-      model,      // <-- ADDED
+      provider,
+      model,
+      mcp_ids: selectedMcps,
     });
   };
 
@@ -116,7 +131,7 @@ export const AddAgentNodeDialog = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-lg"> {/* Made dialog wider */}
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add New Agent</DialogTitle>
           <DialogDescription>
@@ -218,7 +233,28 @@ export const AddAgentNodeDialog = ({
               rows={6}
             />
           </div>
-          
+
+          {/* --- MCP Selection --- */}
+          {mcps && mcps.length > 0 && (
+            <div className="grid grid-cols-4 items-start gap-4">
+              <Label className="text-right pt-2">MCP Integrations</Label>
+              <div className="col-span-3 space-y-2 border rounded-md p-3">
+                {mcps.map((mcp) => (
+                  <div key={mcp.id} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`mcp-${mcp.id}`}
+                      checked={selectedMcps.includes(mcp.id)}
+                      onCheckedChange={() => handleMcpToggle(mcp.id)}
+                    />
+                    <Label htmlFor={`mcp-${mcp.id}`} className="text-sm font-normal cursor-pointer">
+                      {mcp.name}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">Cancel</Button>
