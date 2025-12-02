@@ -4,7 +4,7 @@ import { type Node, type Edge } from '@xyflow/react';
 // --- Enums ---
 export enum AgentProvider { OPENAI = 'openai', ANTHROPIC = 'anthropic', GOOGLE = 'google', CUSTOM = 'custom' }
 export enum AgentRole { GENERAL = 'general', SUPERVISOR = 'supervisor' }
-export enum ToolType { WEB_SEARCH = 'web_search', CUSTOM = 'custom' }
+export enum ToolType { WEB_SEARCH = 'web_search', POSTGRES = 'postgres', CUSTOM = 'custom' }
 
 // --- Node Data Interfaces ---
 export interface BaseNodeData {

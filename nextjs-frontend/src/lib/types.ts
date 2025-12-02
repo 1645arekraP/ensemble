@@ -115,6 +115,7 @@ export enum AgentRole {
 
 export enum ToolType {
   WEB_SEARCH = 'web_search',
+  POSTGRES = 'postgres',
   CUSTOM = 'custom'
 }
 

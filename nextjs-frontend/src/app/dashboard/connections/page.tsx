@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { SiteHeader } from "@/components/site-header";
 import { AddCredentialDialog } from '@/components/AddCredentialDialog'; // Adjust path as needed
+import { AddDatabaseDialog } from '@/components/AddDatabaseDialog';
 import { 
   getCredentials, 
   createCredential, 
@@ -26,14 +27,20 @@ const SERVICE_CONNECTIONS = [
   },
   {
     name: "Google (Gmail, etc.)",
-    type: "oauth", 
-    connect_url: "/api/auth/google/connect/", 
+    type: "oauth",
+    connect_url: "/api/auth/google/connect/",
+  },
+  {
+    name: "PostgreSQL Database",
+    type: "database",
+    credential_type: "postgres",
   },
 ];
 
 export default function ConnectionsPage() {
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isDatabaseDialogOpen, setIsDatabaseDialogOpen] = useState(false);
   const [selectedCredentialType, setSelectedCredentialType] = useState<string | undefined>();
 
   // Query to fetch all *existing* credentials
@@ -89,6 +96,11 @@ export default function ConnectionsPage() {
     setSelectedCredentialType(credentialType);
     setIsDialogOpen(true);
   };
+
+  // Handler for the "Add Database" button
+  const handleOpenDatabaseDialog = () => {
+    setIsDatabaseDialogOpen(true);
+  };
   
   // Handler for the delete button
   const handleDeleteClick = (id: number) => {
@@ -100,7 +112,7 @@ export default function ConnectionsPage() {
   return (
     <>
       <SiteHeader name="My Connections" />
-      
+
       {/* Render the dialog, passing the selected type */}
       <AddCredentialDialog
         isOpen={isDialogOpen}
@@ -108,6 +120,14 @@ export default function ConnectionsPage() {
         onSubmit={handleCreateSubmit}
         isPending={isCreating}
         defaultCredentialType={selectedCredentialType}
+      />
+
+      {/* Database connection dialog */}
+      <AddDatabaseDialog
+        isOpen={isDatabaseDialogOpen}
+        onOpenChange={setIsDatabaseDialogOpen}
+        onSubmit={handleCreateSubmit}
+        isPending={isCreating}
       />
       
       <main className="container max-w-5xl mx-auto p-4 md:p-8">
@@ -124,12 +144,21 @@ export default function ConnectionsPage() {
               <CardContent>
                 {service.type === 'oauth' ? (
                   // OAUTH: Button triggers the connectGoogle mutation
-                  <Button 
+                  <Button
                     className="w-full"
                     onClick={() => connectGoogle()}
                     disabled={isConnecting}
                   >
                     {isConnecting ? "Connecting..." : "Connect"}
+                  </Button>
+                ) : service.type === 'database' ? (
+                  // DATABASE: Button opens the database dialog
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => handleOpenDatabaseDialog()}
+                  >
+                    Add Database
                   </Button>
                 ) : (
                   // API KEY: Button opens the dialog

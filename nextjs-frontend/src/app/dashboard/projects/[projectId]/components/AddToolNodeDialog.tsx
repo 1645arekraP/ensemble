@@ -26,6 +26,7 @@ enum ToolType {
   SLACK_WEBHOOK = 'slack_webhook',
   TEAMS_WEBHOOK = 'teams_webhook',
   GMAIL = 'gmail',
+  POSTGRES = 'postgres',
 }
 
 interface AddToolNodeDialogProps {
@@ -101,9 +102,10 @@ export const AddToolNodeDialog = ({
     toolType === ToolType.TEAMS_WEBHOOK;
     
   // Helper to determine if auth is handled by Connections page
-  const authHandledByConnections = 
+  const authHandledByConnections =
     toolType === ToolType.WEB_SEARCH ||
-    toolType === ToolType.GMAIL;
+    toolType === ToolType.GMAIL ||
+    toolType === ToolType.POSTGRES;
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
@@ -148,6 +150,7 @@ export const AddToolNodeDialog = ({
               <SelectContent>
                 <SelectItem value={ToolType.WEB_SEARCH}>Web Search</SelectItem>
                 <SelectItem value={ToolType.GMAIL}>Gmail</SelectItem>
+                <SelectItem value={ToolType.POSTGRES}>PostgreSQL Database</SelectItem>
                 <SelectItem value={ToolType.DISCORD_WEBHOOK}>Discord Webhook</SelectItem>
                 <SelectItem value={ToolType.SLACK_WEBHOOK}>Slack Webhook</SelectItem>
                 <SelectItem value={ToolType.TEAMS_WEBHOOK}>Microsoft Teams Webhook</SelectItem>
