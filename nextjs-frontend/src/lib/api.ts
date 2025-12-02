@@ -1,9 +1,20 @@
 import { apiClient, setAccessToken } from './apiClient';
 import { LoginResponse, NewUserData, User } from './interfaces';
-import { GraphGeneratePayload, GraphGenerateResponse, Project } from './types';
-import { type Tool } from "@/lib/types";
-import { NewToolNodePayload } from './types';
-import { ApiTool, UserCredential, NewCredentialPayload } from './types';
+import {
+  type Project,
+  type ApiTool,
+  GraphGeneratePayload,
+  GraphGenerateResponse,
+  AgentNodeData,
+  ToolNodeData,
+  ChatMessage,
+  NewAgentNodePayload,
+  NewToolNodePayload,
+  AgentRole,
+  AgentProvider,
+  ToolType
+} from '@/lib/types';
+import { UserCredential, NewCredentialPayload } from './types';
 
 /**
  * The single function to restore a user's session.
@@ -28,7 +39,7 @@ export const fetchCurrentUser = async (): Promise<User> => {
     if (!userResponse.ok) {
       throw new Error('Failed to fetch user data with new token.');
     }
-    
+
     return userResponse.json();
 
   } catch (error) {
@@ -51,7 +62,7 @@ export const loginUser = async (email, password): Promise<LoginResponse> => {
   }
 
   const data: LoginResponse = await response.json();
-  
+
   // Save the access token in our in-memory store
   setAccessToken(data.access);
 
@@ -133,19 +144,7 @@ export const updateProjectGraph = async ({ projectId, graphData }: { projectId: 
 };
 
 
-export interface NewAgentNodePayload {
-  project: number | string; // Project ID
-  name: string;
-  description: string;
-  system_instruction_prompt: string;
-  role: string; 
-  provider: string; 
-  model: string;
-  tools: number[]; // Array of Tool node primary keys
-  metadata: {
-    position: { x: number; y: number };
-  };
-}
+
 
 
 
@@ -175,8 +174,8 @@ export interface ApiToolNode {
   };
 }
 
-export type ApiNode = 
-  | ({ type: 'agent' } & ApiAgentNode) 
+export type ApiNode =
+  | ({ type: 'agent' } & ApiAgentNode)
   | ({ type: 'tool' } & ApiToolNode);
 
 
@@ -190,7 +189,7 @@ export const createAgentNode = async (payload: NewAgentNodePayload): Promise<Api
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ 
+    const errorData = await response.json().catch(() => ({
       detail: 'Failed to create agent node.'
     }));
     throw new Error(errorData.detail);
@@ -227,7 +226,7 @@ export interface RunGraphResult {
  */
 export const runProjectGraph = async (payload: RunGraphPayload): Promise<RunGraphResult> => {
   const { projectId, input } = payload;
-  
+
   // This endpoint is consistent with your getProjectById and updateProjectGraph
   // and matches the backend file structure (`apps/executions` or `apps/graph`)
   const response = await apiClient(`/api/graphs/${projectId}/run/`, {
@@ -245,9 +244,9 @@ export const runProjectGraph = async (payload: RunGraphPayload): Promise<RunGrap
   return response.json();
 };
 
-export async function getTools(): Promise<Tool[]> {
+export async function getTools(): Promise<ApiTool[]> {
   // We'll assume your apiClient handles the auth token
-  const response = await apiClient('/api/tools/'); 
+  const response = await apiClient('/api/tools/');
   if (!response.ok) {
     throw new Error('Failed to fetch tools');
   }
@@ -267,7 +266,7 @@ export async function createToolNode(payload: NewToolNodePayload): Promise<ApiTo
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.detail || 'Failed to create tool');
   }
-  
+
   return response.json();
 }
 
@@ -345,7 +344,7 @@ export async function generateAgentConfig(
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.detail || 'Failed to generate agent config');
   }
-  
+
   return response.json();
 }
 
@@ -364,6 +363,47 @@ export async function generateGraphFromPrompt(
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.detail || 'Failed to generate graph from prompt');
   }
-  
+
   return response.json();
 }
+
+/**
+ * Validates the graph's credentials before execution.
+ */
+export const validateGraph = async (projectId: string): Promise<{ valid: boolean; errors: string[] }> => {
+  const response = await apiClient(`/api/graphs/${projectId}/validate/`);
+  if (!response.ok) {
+    throw new Error('Failed to validate graph.');
+  }
+  return response.json();
+};
+
+export interface ExecutionLog {
+  id: number;
+  graph: number;
+  user: number;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  started_at: string;
+  completed_at: string | null;
+  final_output: string;
+  logs: any[];
+  initial_input: any;
+}
+
+export const getProjectExecutions = async (projectId: string): Promise<ExecutionLog[]> => {
+  const response = await apiClient(`/api/executions/?graph_id=${projectId}`); // Assuming apiClient can handle relative paths or base URL is set
+  if (!response.ok) {
+    throw new Error('Failed to fetch project executions.');
+  }
+  return response.json();
+};
+
+export const deleteExecution = async (executionId: number): Promise<void> => {
+  const response = await apiClient(`/api/executions/${executionId}/`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to delete execution.');
+  }
+};

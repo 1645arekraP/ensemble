@@ -279,6 +279,16 @@ function renderLogItem(log: any) {
   if (log.type === 'update') {
     return <span className="text-yellow-500/80">⚡ {log.message}</span>;
   }
+  if (log.type === 'tool_output') {
+    return (
+      <div className="mt-1 mb-2">
+        <div className="text-blue-400 font-bold text-xs mb-1">🛠️ Tool Output ({log.node}):</div>
+        <div className="bg-black/30 p-2 rounded border border-white/10 text-neutral-300 font-mono text-xs whitespace-pre-wrap">
+          {log.output}
+        </div>
+      </div>
+    );
+  }
   if (log.type === 'complete') {
     return <span className="text-green-400 font-bold">✅ {log.message}</span>;
   }

@@ -2,6 +2,7 @@ import logging
 from django.conf import settings
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from .models import UserCredential, encrypt_secret, decrypt_secret
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,14 @@ def refresh_google_token(credential: UserCredential) -> Credentials:
         logger.info(f"Successfully refreshed token for user {credential.user_id}")
         return creds
         
+    except RefreshError as e:
+        logger.error(f"Google RefreshError for user {credential.user_id}: {e}")
+        if "invalid_grant" in str(e):
+            logger.warning(f"Google token for user {credential.user_id} is invalid/revoked. Deleting credential.")
+            credential.delete()
+            raise Exception("Google token expired or revoked. Please re-connect your Google account.")
+        raise Exception(f"Failed to refresh Google token: {e}")
+
     except Exception as e:
         logger.error(f"Failed to refresh Google token for user {credential.user_id}: {e}")
         # This will fail the tool run, which is correct
