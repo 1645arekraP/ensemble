@@ -164,7 +164,7 @@ class GraphCompiler:
             # --- SUPERVISOR LOGIC ---
             routing_map = {"END": "END", "FINISH": "END"}
             all_node_names_in_graph = set()
-            
+
             for edge in edges_json:
                 if edge.get('source') == supervisor_rf_id:
                     target_name = rf_id_to_agent_name_map.get(edge.get('target'))
@@ -172,7 +172,10 @@ class GraphCompiler:
                         routing_map[target_name] = target_name
                         all_node_names_in_graph.add(target_name)
                         nodes_with_outgoing_edges.add(supervisor_rf_id)
-            
+
+            print(f"\n📍 Routing map: {routing_map}")
+            print(f"📍 All nodes: {all_node_names_in_graph}\n")
+
             def supervisor_router(state: AgentState) -> str:
                 """Reads the supervisor's decision from the state and routes."""
                 print("\n" + "🔀"*40)
@@ -191,15 +194,18 @@ class GraphCompiler:
                 
                 next_node = decision.get('next_agent')
                 is_complete = decision.get('is_complete', False)
-                
+
+                print(f"📍 Decision next_agent: '{next_node}'")
+                print(f"📍 Available routes: {list(routing_map.keys())}")
+
                 if is_complete or next_node == "FINISH":
                     print("✅ ROUTING DECISION: END (task complete)")
                     return "END"
-                
+
                 if next_node and next_node in routing_map:
                     print(f"✅ ROUTING DECISION: {next_node}")
                     return next_node
-                
+
                 print(f"⚠️ Decision '{next_node}' not in routing_map! Defaulting to END.")
                 return "END"
 

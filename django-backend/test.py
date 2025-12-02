@@ -1,476 +1,278 @@
 #!/usr/bin/env python
 """
-Test script for the multi-agent system
-Run with: python test_agents.py
+MCP Server Integration Test
+Run with: python test.py
 """
 
 import os
 import sys
 import django
-from django.conf import settings
 
 # Setup Django environment
 if __name__ == '__main__':
-    # Add your project root to Python path
     project_root = os.path.dirname(os.path.abspath(__file__))
     sys.path.insert(0, project_root)
-    
-    # Configure Django settings - adjust this path to your settings
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'project.settings')
     django.setup()
 
-# Now import Django models after setup
 from django.contrib.auth import get_user_model
 from apps.agents.models import Agent
 from apps.graph.models import Graph
-from apps.tools.models import Tool
+from apps.tools.models import mcp
 from apps.graph.services.runner import GraphRunner
-import json
-from datetime import datetime
 
 
-def create_demo_user():
-    """Create or get a demo user"""
+def setup_user():
+    """Create or get test user"""
     User = get_user_model()
     user, created = User.objects.get_or_create(
-        email='demo@example.com',
-        defaults={
-            'first_name': 'Demo',
-            'last_name': 'User'
-        }
+        email='mcp_test@example.com',
+        defaults={'first_name': 'MCP', 'last_name': 'Tester'}
     )
-    
-    if created:
-        print(f"✅ Created demo user: {user.email}")
-    else:
-        print(f"📋 Using existing user: {user.email}")
-    
+    print(f"{'✅ Created' if created else '📋 Using'} user: {user.email}\n")
     return user
 
 
-def create_demo_tools():
-    """Create demo tools"""
-    print("\n🔧 Setting up tools...")
-    
-    # Web search tool
-    search_tool, created = Tool.objects.get_or_create(
-        name='web_search',
+def create_mcp_server():
+    """Create or get MCP server configuration"""
+    print("🔧 Setting up MCP server...")
+
+    # You can configure your MCP server URL here
+    mcp_server, created = mcp.objects.get_or_create(
+        name='filesystem',
         defaults={
-            'description': 'Search the web for current information. Use this when you need to find recent facts, statistics, or information about any topic.',
-            'tool_type': Tool.ToolType.WEB_SEARCH,
-            'config': {},  # DuckDuckGo doesn't need API keys
-            'is_active': True
+            'description': 'Greet someone via MCP protocol',
+            'url': 'http://localhost:8000'  # Change this to your MCP server URL
         }
     )
-    
-    if created:
-        print(f"  ✅ Created search tool")
-    else:
-        print(f"  📋 Using existing search tool")
-    
-    return search_tool
+
+    print(f"{'✅ Created' if created else '📋 Using'} MCP server: {mcp_server.name}")
+    print(f"   URL: {mcp_server.url}")
+    print(f"   Description: {mcp_server.description}\n")
+
+    return mcp_server
 
 
-def create_demo_graph(user, search_tool):
-    """Create a demo supervisor graph"""
-    print("\n📊 Setting up graph...")
-    
-    # Create or get the graph
-    graph, created = Graph.objects.get_or_create(
-        owner=user,
-        name="Content Creation Team",
-        defaults={
-            'description': "A supervisor-led team for creating research-based content",
-            'graph_data': {
-                'supervisor': 'supervisor',
-                'routing_rules': {
-                    'researcher': 'researcher',
-                    'writer': 'writer', 
-                    'reviewer': 'reviewer',
-                    'FINISH': 'END'
-                },
-                'max_iterations': 10
-            }
-        }
-    )
-    
-    if created:
-        print(f"  ✅ Created graph: {graph.name}")
-        
-        # Create supervisor agent
-        supervisor = Agent.objects.create(
-            project=graph,
-            name='supervisor',
-            description='Coordinates the content creation workflow',
-            system_instruction_prompt='''You are a content creation supervisor managing a team of specialists:
+def create_mcp_test_graph(user, mcp_server):
+    """Create a simple graph with MCP-enabled agent"""
+    print("📊 Setting up test graph...")
 
-- researcher: Gathers information and conducts research on any topic
-- writer: Creates well-structured written content based on research  
-- reviewer: Reviews and improves content quality, checking for accuracy and clarity
+    # Delete old test graph and agents if they exist
+    Graph.objects.filter(owner=user, name="MCP Test Graph").delete()
+    Agent.objects.filter(user=user, name__in=['mcp_supervisor', 'mcp_worker']).delete()
+    print("🗑️  Deleted old graph and agents (if any)")
 
-Your responsibilities:
-1. Analyze incoming requests and determine the workflow
-2. Route tasks to the appropriate team member
-3. Coordinate handoffs between team members  
-4. Decide when the work is complete
+    # First, create agents
+    supervisor = Agent.objects.create(
+        user=user,
+        name='mcp_supervisor',
+        description='Coordinates MCP tasks',
+        system_instruction_prompt='''You are a supervisor coordinating MCP-based tasks.
 
-Always end your response with a decision in this format:
+You have one agent available:
+- mcp_worker: Has access to MCP server tools for greeting people
+
+Your job is to delegate work to the appropriate agent.
+
+IMPORTANT:
+- When you receive a greeting request, you MUST route to "mcp_worker" first
+- The mcp_worker will use the MCP tools to complete the greeting
+- Only use FINISH after the worker has completed their task
+
 <decision>
-next_agent: [researcher/writer/reviewer/FINISH]
-reason: [why you chose this agent]
+next_agent: [mcp_worker/FINISH]
 is_complete: [true/false]
-</decision>
+reasoning: [brief explanation]
+</decision>''',
+        role=Agent.AgentRole.SUPERVISOR,
+        provider=Agent.AgentProvider.OPENAI,
+        model='gpt-4o'
+    )
 
-Be strategic about the workflow. Usually: research → write → review → done.''',
-            role=Agent.AgentRole.SUPERVISOR,
-            provider=Agent.AgentProvider.OPENAI,
-            model='gpt-4o'
-        )
-        print(f"    ✅ Created supervisor: {supervisor.name}")
-        
-        # Create researcher agent
-        researcher = Agent.objects.create(
-            project=graph,
-            name='researcher', 
-            description='Conducts thorough research on assigned topics',
-            system_instruction_prompt='''You are a research specialist. Your responsibilities:
+    # Create MCP worker with MCP server access
+    mcp_worker = Agent.objects.create(
+        user=user,
+        name='mcp_worker',
+        description='Executes tasks using MCP server tools',
+        system_instruction_prompt='''You are a worker agent with access to MCP server tools for greeting people.
 
-1. Gather comprehensive, accurate information on assigned topics
-2. Find credible sources and identify key facts
-3. Organize findings in a clear, structured format
-4. Provide research summaries that others can build upon
+IMPORTANT: You MUST use the MCP tools available to you. Do not just respond with text.
 
-Focus on:
-- Accuracy and credibility of sources
-- Comprehensive coverage of the topic
-- Clear organization of information
-- Actionable insights for content creation
+When given a greeting task:
+1. Look at the available tools (they will be from the MCP server)
+2. Use the appropriate greeting tool with the person's name
+3. Report the result from the tool
+4. Explain what you did
 
-Be thorough but concise. Always cite your reasoning.''',
-            role=Agent.AgentRole.GENERAL,
-            provider=Agent.AgentProvider.OPENAI,
-            model='gpt-4o'
-        )
-        researcher.tools.add(search_tool)
-        print(f"    ✅ Created researcher: {researcher.name}")
-        
-        # Create writer agent
-        writer = Agent.objects.create(
-            project=graph,
-            name='writer',
-            description='Creates high-quality written content',
-            system_instruction_prompt='''You are a writing specialist. Your responsibilities:
+Remember: You have tools available - use them!''',
+        role=Agent.AgentRole.GENERAL,
+        provider=Agent.AgentProvider.OPENAI,
+        model='gpt-4o'
+    )
 
-1. Transform research and information into engaging, well-structured content
-2. Maintain consistent tone, style, and voice
-3. Ensure content flows logically and is easy to read
-4. Create content appropriate for the intended audience
+    # Connect MCP server to the worker
+    mcp_worker.mcp.add(mcp_server)
 
-Focus on:
-- Clear, engaging writing style
-- Logical structure and flow
-- Proper formatting and organization
-- Meeting the specific requirements of the task
+    # Now create graph with proper ReactFlow structure
+    graph = Graph.objects.create(
+        owner=user,
+        name="MCP Test Graph",
+        description="Simple graph to test MCP server integration",
+        graph_data={
+                'nodes': [
+                    {
+                        'id': 'supervisor-1',
+                        'type': 'agent',
+                        'data': {
+                            'id': supervisor.id,
+                            'label': supervisor.name,
+                            'name': supervisor.name,
+                            'role': 'supervisor'
+                        }
+                    },
+                    {
+                        'id': 'worker-1',
+                        'type': 'agent',
+                        'data': {
+                            'id': mcp_worker.id,
+                            'label': mcp_worker.name,
+                            'name': mcp_worker.name,
+                            'role': 'general'
+                        }
+                    }
+                ],
+                'edges': [
+                    {
+                        'id': 'e1',
+                        'source': 'supervisor-1',
+                        'target': 'worker-1',
+                        'data': {'label': 'route_to_worker'}
+                    }
+                ]
+            }
+    )
 
-Use the research provided to create compelling, accurate content.''',
-            role=Agent.AgentRole.GENERAL,
-            provider=Agent.AgentProvider.OPENAI,
-            model='gpt-4o'
-        )
-        print(f"    ✅ Created writer: {writer.name}")
-        
-        # Create reviewer agent
-        reviewer = Agent.objects.create(
-            project=graph,
-            name='reviewer',
-            description='Reviews and improves content quality',
-            system_instruction_prompt='''You are a content reviewer and editor. Your responsibilities:
+    print(f"✅ Created graph: {graph.name}")
+    print(f"   Supervisor: {supervisor.name}")
+    print(f"   Worker: {mcp_worker.name} (with MCP server: {mcp_server.name})\n")
 
-1. Review content for accuracy, clarity, and completeness
-2. Check that content meets the original requirements
-3. Identify areas for improvement in structure, flow, and readability
-4. Ensure the final content is polished and professional
-
-Focus on:
-- Factual accuracy and consistency
-- Clear communication and readability
-- Proper structure and organization
-- Meeting the original brief and requirements
-
-Provide specific, constructive feedback and improvements.''',
-            role=Agent.AgentRole.GENERAL,
-            provider=Agent.AgentProvider.OPENAI,
-            model='gpt-4o'
-        )
-        print(f"    ✅ Created reviewer: {reviewer.name}")
-        
-    else:
-        print(f"  📋 Using existing graph: {graph.name}")
-    
     return graph
 
 
-def test_simple_graph(user):
-    """Create and test a simple 2-agent supervisor graph"""
-    print("\n🧪 Creating simple test graph...")
-    
-    # Create simple graph
-    simple_graph, created = Graph.objects.get_or_create(
-        owner=user,
-        name="Simple Test Team",
-        defaults={
-            'description': "Simple supervisor + worker for testing",
-            'graph_data': {
-                'supervisor': 'simple_supervisor',
-                'routing_rules': {
-                    'worker': 'worker',
-                    'FINISH': 'END'
-                },
-                'max_iterations': 5
-            }
-        }
-    )
-    
-    if created:
-        # Create simple supervisor
-        Agent.objects.create(
-            project=simple_graph,
-            name='simple_supervisor',
-            description='Simple test supervisor',
-            system_instruction_prompt='''You coordinate simple tasks. You have one worker agent available.
-
-Analyze the task and decide:
-- Route to "worker" if work needs to be done
-- Mark complete when task is finished
-
-<decision>
-next_agent: [worker/FINISH]  
-reason: [your reasoning]
-is_complete: [true/false]
-</decision>''',
-            role=Agent.AgentRole.SUPERVISOR,
-            provider=Agent.AgentProvider.OPENAI,
-            model='gpt-4o'
-        )
-        
-        # Create simple worker
-        Agent.objects.create(
-            project=simple_graph,
-            name='worker',
-            description='Simple test worker',
-            system_instruction_prompt='You are a helpful worker. Complete the assigned task efficiently and clearly.',
-            role=Agent.AgentRole.GENERAL,
-            provider=Agent.AgentProvider.OPENAI,
-            model='gpt-4o'
-        )
-        
-        print(f"  ✅ Created simple graph: {simple_graph.name}")
-    else:
-        print(f"  📋 Using existing simple graph")
-    
-    return simple_graph
-
-
-def test_tool_calling(user, search_tool):
-    """Create and test a simple agent with tool calling capability"""
-    print("\n🧪 Creating tool calling test graph...")
-    
-    # Create tool test graph
-    tool_graph, created = Graph.objects.get_or_create(
-        owner=user,
-        name="Tool Test Graph",
-        defaults={
-            'description': "Simple graph to test web search tool calling",
-            'graph_data': {
-                'supervisor': 'search_supervisor',
-                'routing_rules': {
-                    'searcher': 'searcher',
-                    'FINISH': 'END'
-                },
-                'max_iterations': 5
-            }
-        }
-    )
-    
-    if created:
-        # Create supervisor
-        Agent.objects.create(
-            project=tool_graph,
-            name='search_supervisor',
-            description='Supervises search tasks',
-            system_instruction_prompt='''You coordinate search tasks. You have a searcher agent with web search capabilities.
-
-Analyze the task and decide:
-- Route to "searcher" if web search is needed
-- Mark complete when search results have been provided
-
-<decision>
-next_agent: [searcher/FINISH]
-reason: [your reasoning]
-is_complete: [true/false]
-</decision>''',
-            role=Agent.AgentRole.SUPERVISOR,
-            provider=Agent.AgentProvider.OPENAI,
-            model='gpt-4o'
-        )
-        
-        # Create searcher with tool
-        searcher = Agent.objects.create(
-            project=tool_graph,
-            name='searcher',
-            description='Searches the web for information',
-            system_instruction_prompt='''You are a web search specialist. Use the web_search tool to find current information.
-
-When given a search task:
-1. Use the web_search tool to gather information
-2. Summarize the key findings clearly
-3. Provide relevant facts and sources
-
-Always use the tool for current information rather than relying on your training data.''',
-            role=Agent.AgentRole.GENERAL,
-            provider=Agent.AgentProvider.OPENAI,
-            model='gpt-4o'
-        )
-        searcher.tools.add(search_tool)
-        
-        print(f"  ✅ Created tool test graph: {tool_graph.name}")
-        print(f"  ✅ Searcher agent has web_search tool enabled")
-    else:
-        print(f"  📋 Using existing tool test graph")
-    
-    return tool_graph
-
-
-def run_test(graph, test_input, test_name="Test"):
-    """Run a test with the given graph and input"""
-    print(f"\n🚀 Running {test_name}...")
-    print(f"📝 Input: {test_input}")
+def run_mcp_test(graph, user):
+    """Run MCP integration test"""
     print("="*60)
-    
+    print("🚀 Running MCP Server Test")
+    print("="*60)
+
+    # Test input - explicit request to use MCP tool
+    test_input = "Please greet Parker using the MCP greeting tool"
+
+    print(f"📝 Test Input: {test_input}\n")
+    print("⏳ Executing graph...\n")
+
     try:
-        # Create runner and execute
         runner = GraphRunner()
         result = runner.run_graph(
             graph=graph,
             initial_input=test_input,
-            user=graph.owner
+            user=user
         )
-        
+
+        print("\n" + "="*60)
         if result['success']:
-            print("✅ SUCCESS!")
-            
+            print("✅ TEST PASSED\n")
+
             # Show agent outputs
             if result.get('agent_outputs'):
-                print("\n📊 Agent Execution Summary:")
+                print("📊 Agent Execution Details:\n")
                 for agent_name, output in result['agent_outputs'].items():
-                    print(f"\n🤖 {agent_name.upper()}:")
+                    print(f"🤖 {agent_name.upper()}:")
+                    print(f"   Role: {output.get('agent_role', 'N/A')}")
+                    print(f"   Timestamp: {output.get('timestamp', 'N/A')}")
+
                     response = output.get('response', '')
-                    if len(response) > 200:
-                        print(f"   {response[:200]}...")
-                        print(f"   [Response truncated - {len(response)} chars total]")
-                    else:
-                        print(f"   {response}")
-            
-            # Show final result
-            messages = result.get('messages', [])
-            if messages:
-                print(f"\n🎯 FINAL OUTPUT:")
-                print("-" * 40)
-                print(messages[-1])
-            
+                    if response:
+                        print(f"   Response: {response[:300]}...")
+                    print()
+
+            # Show final state
+            if result.get('state'):
+                print(f"📋 Final State:")
+                print(f"   Complete: {result['state'].get('is_complete', False)}")
+                print(f"   Next Agent: {result['state'].get('next_agent', 'N/A')}")
+
+            # Show execution ID
             if result.get('execution_id'):
-                print(f"\n📋 Logged as execution ID: {result['execution_id']}")
-                
+                print(f"\n💾 Execution logged with ID: {result['execution_id']}")
         else:
-            print(f"❌ FAILED: {result.get('error', 'Unknown error')}")
-            
+            print("❌ TEST FAILED\n")
+            print(f"Error: {result.get('error', 'Unknown error')}")
+
+        print("="*60)
+
     except Exception as e:
-        print("\n💥 EXCEPTION DETAILS:")
-        print("-" * 60)
+        print("\n" + "="*60)
+        print("❌ EXCEPTION OCCURRED\n")
+        print(f"Error: {str(e)}\n")
+        print("Full traceback:")
+        print("-"*60)
         import traceback
         traceback.print_exc()
-        print("\nError message:", str(e))
-        print("-" * 60)
-    
-    print("="*60)
+        print("="*60)
 
 
 def main():
     """Main test function"""
-    print("🎬 Starting Multi-Agent System Test")
-    print("=" * 50)
-    
-    # Check environment
+    print("\n" + "="*60)
+    print("🧪 MCP SERVER INTEGRATION TEST")
+    print("="*60 + "\n")
+
+    # Check for OpenAI API key
+    from django.conf import settings
     if not settings.OPENAI_API_KEY:
-        print("⚠️  WARNING: OPENAI_API_KEY not found in settings")
-        print("   Add it to your .env file as: OPENAI_API_KEY='your-key-here'")
+        print("⚠️  WARNING: OPENAI_API_KEY not found!")
+        print("   Set it in your .env file: OPENAI_API_KEY='your-key-here'\n")
         return
-    
+
+    print("📋 Prerequisites:")
+    print("   ✓ Django configured")
+    print("   ✓ OpenAI API key found")
+    print()
+
+    print("💡 Before running this test:")
+    print("   1. Make sure your MCP server is running")
+    print("   2. Update the MCP server URL in this script if needed")
+    print("   3. Default URL: http://localhost:3000")
+    print()
+
     try:
         # Setup
-        user = create_demo_user()
-        search_tool = create_demo_tools()
-        
-        # Test 0: Tool calling
-        print("\n" + "="*50)
-        print("TEST 0: Web Search Tool Calling")
-        print("="*50)
-        
-        tool_graph = test_tool_calling(user, search_tool)
-        run_test(
-            tool_graph,
-            "Give me a summary of Georgia Tech's 2025 football season and who they played including the dates / final scores.",
-            "Tool Calling Test"
-        )
-        
-        # Test 1: Simple graph
-        print("\n" + "="*50)
-        print("TEST 1: Simple Supervisor Pattern")
-        print("="*50)
-        
-        simple_graph = test_simple_graph(user)
-        run_test(
-            simple_graph, 
-            "Hello, please write a short greeting message.",
-            "Simple Test"
-        )
-        
-        # Test 2: Complex content creation
-        print("\n" + "="*50) 
-        print("TEST 2: Content Creation Team")
-        print("="*50)
-        
-        content_graph = create_demo_graph(user, search_tool)
-        run_test(
-            content_graph,
-            "Write a short article about the benefits of renewable energy, including some statistics.",
-            "Content Creation Test"
-        )
-        
-        # Test 3: Different task type
-        print("\n" + "="*50)
-        print("TEST 3: Research Task")
-        print("="*50)
-        
-        run_test(
-            content_graph,
-            "Research and summarize the current state of electric vehicle adoption worldwide.",
-            "Research Test"
-        )
-        
-        print("\n🎉 All tests completed!")
-        print("\n📊 Check your database for execution logs:")
-        print("   - ExecutionLog: Overall graph runs")
-        print("   - ExecutionStep: Individual agent executions")
-        
+        user = setup_user()
+        mcp_server = create_mcp_server()
+        graph = create_mcp_test_graph(user, mcp_server)
+
+        # Run test
+        run_mcp_test(graph, user)
+
+        print("\n" + "="*60)
+        print("🎉 Test Complete!")
+        print("="*60)
+        print("\n💡 Next steps:")
+        print("   - Check the output above for MCP tool execution")
+        print("   - Verify MCP server received the requests")
+        print("   - Check database for ExecutionLog and ExecutionStep entries")
+        print()
+
     except Exception as e:
-        print("\n💥 Setup failed. Full error trace:")
-        print("="*50)
+        print("\n" + "="*60)
+        print("❌ SETUP FAILED")
+        print("="*60)
+        print(f"\nError: {str(e)}\n")
         import traceback
         traceback.print_exc()
-        print("="*50)
-        print("Error message:", str(e))
-        print("Error type:", type(e).__name__)
+        print()
+
 
 if __name__ == '__main__':
     main()

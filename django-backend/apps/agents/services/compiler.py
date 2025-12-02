@@ -23,12 +23,34 @@ def _hydrate_messages(messages: List[Any]) -> List[BaseMessage]:
     hydrated = []
     if not messages:
         return []
-        
+
     for msg in messages:
-        if isinstance(msg, BaseMessage):
+        # Check if it's already a properly typed message (not just BaseMessage)
+        if isinstance(msg, (HumanMessage, AIMessage, SystemMessage, ToolMessage)):
             hydrated.append(msg)
             continue
-        
+
+        # If it's a generic BaseMessage or has type attribute, convert it
+        if isinstance(msg, BaseMessage):
+            # Get the type attribute
+            msg_type = getattr(msg, 'type', None)
+            content = msg.content
+            additional_kwargs = getattr(msg, 'additional_kwargs', {})
+
+            if msg_type == 'human':
+                hydrated.append(HumanMessage(content=content, additional_kwargs=additional_kwargs))
+            elif msg_type == 'ai':
+                hydrated.append(AIMessage(content=content, additional_kwargs=additional_kwargs))
+            elif msg_type == 'tool':
+                tool_call_id = getattr(msg, 'tool_call_id', '')
+                hydrated.append(ToolMessage(content=content, tool_call_id=tool_call_id, additional_kwargs=additional_kwargs))
+            elif msg_type == 'system':
+                hydrated.append(SystemMessage(content=content, additional_kwargs=additional_kwargs))
+            else:
+                # Fallback: try to keep it as is
+                hydrated.append(msg)
+            continue
+
         if hasattr(msg, 'model_dump'):
             msg_dict = msg.model_dump()
         elif isinstance(msg, dict):
@@ -38,17 +60,23 @@ def _hydrate_messages(messages: List[Any]) -> List[BaseMessage]:
             continue
 
         msg_type = msg_dict.get('type')
+
+        # Extract only the fields that the message constructors accept
+        content = msg_dict.get('content', '')
+        additional_kwargs = msg_dict.get('additional_kwargs', {})
+
         if msg_type == 'human':
-            hydrated.append(HumanMessage(**msg_dict))
+            hydrated.append(HumanMessage(content=content, additional_kwargs=additional_kwargs))
         elif msg_type == 'ai':
-            hydrated.append(AIMessage(**msg_dict))
+            hydrated.append(AIMessage(content=content, additional_kwargs=additional_kwargs))
         elif msg_type == 'tool':
-            hydrated.append(ToolMessage(**msg_dict))
+            tool_call_id = msg_dict.get('tool_call_id', '')
+            hydrated.append(ToolMessage(content=content, tool_call_id=tool_call_id, additional_kwargs=additional_kwargs))
         elif msg_type == 'system':
-            hydrated.append(SystemMessage(**msg_dict))
+            hydrated.append(SystemMessage(content=content, additional_kwargs=additional_kwargs))
         else:
-            hydrated.append(HumanMessage(content=str(msg_dict.get('content', ''))))
-            
+            hydrated.append(HumanMessage(content=str(content)))
+
     return hydrated
 
 
@@ -171,6 +199,8 @@ class AgentCompiler:
 
     def __init__(self):
         self.compiled_agents: Dict[str, Agent] = {}
+        from ...tools.registry import ToolRegistry
+        self.tool_registry = ToolRegistry()
 
     def _create_llm_instance(self, agent: Agent):
         """Create an LLM instance based on the agent's provider and model."""
@@ -192,28 +222,37 @@ class AgentCompiler:
         else:
             raise NotImplementedError(f"Provider {agent.provider} is not supported yet.")
         
-    def _load_agent_tools(self, agent: Agent):
+    def _load_agent_tools(self, agent: Agent, user=None):
         """Load and configure tools for the agent."""
-        # Get the agent's tools and convert them to LangChain tools
-        
-        # Move this logic to ToolRegistry
-        if agent.mcp.exists():
-            mcp = agent.mcp.first()
-            client = {
-                f"{mcp.name}": {
-                    "transport": "streamable_http",
-                    "base_url": mcp.url
-                }
-            }
+        all_tools = []
 
-        return self.tool_registry.get_tools_for_agent(agent.tools.all())
+        # Load regular tools
+        if agent.tools.exists():
+            regular_tools = self.tool_registry.get_tools_for_agent(
+                agent.tools.all(),
+                user=user
+            )
+            all_tools.extend(regular_tools)
+            logger.info(f"Loaded {len(regular_tools)} regular tools for agent {agent.name}")
+
+        # Load MCP server tools
+        if agent.mcp.exists():
+            mcp_tools = self.tool_registry.get_mcp_tools(agent.mcp.all())
+            all_tools.extend(mcp_tools)
+            logger.info(f"Loaded {len(mcp_tools)} MCP tools for agent {agent.name}")
+
+        return all_tools
     
-    def compile_agent(self, agent: Agent, graph_context=None):
+    def compile_agent(self, agent: Agent, graph_context=None, max_executions=50):
         """Compile an agent into an executable form."""
         if agent.name in self.compiled_agents:
             return self.compiled_agents[agent.name]
-        
+
         llm = self._create_llm_instance(agent)
+
+        # Load tools for this agent (will be passed via state)
+        # Tools are loaded at runtime in the agent_node to access user context
+        agent_tools = []
 
         def agent_node(state: AgentState) -> AgentState:
             # Track agent-specific execution count
@@ -353,22 +392,21 @@ class AgentCompiler:
                         SystemMessage(content=agent.system_instruction_prompt)
                     ] + hydrated_messages
 
+            # Load tools for this agent (with user context)
+            user = state.user if isinstance(state, BaseModel) else state.get('user')
+            tools = self._load_agent_tools(agent, user=user)
+
+            # Bind tools to LLM if available
+            llm_with_tools = llm.bind_tools(tools) if tools else llm
+
             print(f"\n🤖 Calling LLM for agent: {agent.name}...")
             print(f"📝 Message count: {len(messages)}")
             print(f"📝 Message types: {[type(m).__name__ for m in messages]}")
             
             try:
                 response = llm.invoke(messages)
-                response_content = response.content
-                
-                # SANITIZATION: If this is NOT a supervisor, strip out any <decision> blocks
-                # to prevent confusing the actual supervisor in the next turn.
-                if agent.role != Agent.AgentRole.SUPERVISOR:
-                    response_content = re.sub(r'<decision>.*?</decision>', '', response_content, flags=re.DOTALL | re.IGNORECASE).strip()
-                    # Update the response object's content as well
-                    response.content = response_content
-
                 final_messages = hydrated_messages + [response]
+                response_content = response.content
 
             except Exception as e:
                 logger.error(f"❌ LLM call for agent '{agent.name}' FAILED: {e}")
@@ -543,21 +581,20 @@ class AgentCompiler:
     def _parse_decision_text(self, decision_text: str) -> Dict[str, Any]:
         """Parse decision text for routing information"""
         decision = {}
-        
+
         next_agent_match = re.search(r'next_agent:\s*(.+?)(?:\n|$)', decision_text, re.IGNORECASE)
         if next_agent_match:
-            decision['next_agent'] = next_agent_match.group(1).strip()
-        
+            # Strip whitespace and remove brackets if present
+            agent_name = next_agent_match.group(1).strip()
+            agent_name = agent_name.strip('[]')  # Remove [ and ] if LLM included them
+            decision['next_agent'] = agent_name
+
         is_complete_match = re.search(r'is_complete:\s*(true|false)', decision_text, re.IGNORECASE)
         if is_complete_match:
             decision['is_complete'] = is_complete_match.group(1).lower() == 'true'
-        
+
         reason_match = re.search(r'reasoning:\s*(.+?)(?:\n|$)', decision_text, re.IGNORECASE | re.DOTALL)
         if reason_match:
             decision['reasoning'] = reason_match.group(1).strip()
-
-        task_match = re.search(r'task:\s*(.+?)(?:\n|$)', decision_text, re.IGNORECASE | re.DOTALL)
-        if task_match:
-            decision['task'] = task_match.group(1).strip()
         
         return decision
