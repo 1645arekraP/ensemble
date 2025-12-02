@@ -14,6 +14,7 @@ class Tool(models.Model):
         SLACK_WEBHOOK = 'slack_webhook', 'Slack Webhook'
         TEAMS_WEBHOOK = 'teams_webhook', 'Microsoft Teams Webhook'
         GMAIL = 'gmail', 'Google Mail'
+        POSTGRES = 'postgres', 'PostgreSQL Database'
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, 
@@ -61,6 +62,15 @@ Supported actions:
 - Search emails: {"action": "search_emails", "query": "from:sender@example.com"}
 - Get thread: {"action": "get_thread", "thread_id": "..."}
 - Read inbox: {"action": "read_inbox"}"""
+        elif self.tool_type == self.ToolType.POSTGRES:
+            return """A PostgreSQL database tool that can query databases, list tables, and describe table structures.
+To use this tool, output a JSON string with an 'action' field.
+Supported actions:
+- Execute query: {"action": "execute_query", "query": "SELECT * FROM users LIMIT 10"}
+- List tables: {"action": "list_tables"}
+- Describe table: {"action": "describe_table", "table_name": "users"}
+- Test connection: {"action": "test_connection"}
+IMPORTANT: Be careful with UPDATE, DELETE, and INSERT queries as they will modify the database."""
         elif self.tool_type in [self.ToolType.DISCORD_WEBHOOK, self.ToolType.SLACK_WEBHOOK, self.ToolType.TEAMS_WEBHOOK]:
             return f"""A tool to send messages to {self.get_tool_type_display()}.
 To use this tool, output a JSON string with an 'action' and 'message' field.

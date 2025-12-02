@@ -1,7 +1,7 @@
 # apps/tools/services/registry.py
 
 from .functions import tavily_web_search
-from . import webhooks, gmail
+from . import webhooks, gmail, pgconnector
 
 # This registry maps the 'tool_type' (from the Tool model's TextChoices) to the actual Python function that implements it.
 
@@ -14,5 +14,9 @@ TOOL_REGISTRY = {
     "slack_webhook": webhooks.send_slack_message,
     "teams_webhook": webhooks.send_teams_message,
 
+    # Communication Tools
     "gmail": gmail.gmail_tool,
+
+    # Database Tools
+    "postgres": pgconnector.postgres_tool,
 }
