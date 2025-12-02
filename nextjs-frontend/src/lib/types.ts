@@ -1,3 +1,4 @@
+import { type Node, type Edge } from '@xyflow/react';
 
 export type User = {
   id: number;
@@ -16,15 +17,35 @@ export type Project = {
 };
 
 export type Tool = {
-  
+
 }
 
 export type ApiToolNode = {
 
 }
 
-export type NewToolNodePayload = {
+export interface NewAgentNodePayload {
+  project: string;
+  name: string;
+  description: string;
+  role: AgentRole;
+  provider: AgentProvider;
+  model: string;
+  system_instruction_prompt: string;
+  tools: string[];
+  metadata: {
+    position: { x: number; y: number };
+  };
+}
 
+export interface NewToolNodePayload {
+  project: string;
+  name: string;
+  description: string;
+  tool_type: ToolType;
+  metadata: {
+    position: { x: number; y: number };
+  };
 }
 
 export interface ApiTool {
@@ -55,10 +76,10 @@ export interface NewCredentialPayload {
 export interface AddAgentFormState {
   name: string;
   description: string;
-  role: string;
+  role: AgentRole;
   system_instruction_prompt: string;
-  provider: string; 
-  model: string;  
+  provider: AgentProvider;
+  model: string;
 }
 
 export interface GraphGeneratePayload {
@@ -81,18 +102,28 @@ export interface GraphGenerateResponse {
 }
 
 
-export enum AgentProvider { 
-  OPENAI = 'openai', 
-  ANTHROPIC = 'anthropic', 
-  GOOGLE = 'google', 
-  CUSTOM = 'custom' 
+export enum AgentProvider {
+  OPENAI = 'openai',
+  ANTHROPIC = 'anthropic',
+  GOOGLE = 'google',
+  CUSTOM = 'custom'
 }
-export enum AgentRole { 
-  GENERAL = 'general', 
-  SUPERVISOR = 'supervisor' 
+export enum AgentRole {
+  GENERAL = 'general',
+  SUPERVISOR = 'supervisor'
 }
 
-export interface AgentNodeData {
+export enum ToolType {
+  WEB_SEARCH = 'web_search',
+  CUSTOM = 'custom'
+}
+
+export interface BaseNodeData {
+  updateNodeData: (nodeId: string, data: any) => void;
+  deleteNode: (nodeId: string) => void;
+}
+
+export interface AgentNodeData extends BaseNodeData {
   // Core agent properties
   id: number; // The database ID
   name: string;
@@ -101,10 +132,17 @@ export interface AgentNodeData {
   model: string;
   system_instruction_prompt: string;
   description: string;
+  tools: string[]; // Array of Tool Node IDs
+  allNodes: any[]; // List of all nodes for the tool selector (using any[] to avoid circular dependency with Node)
 
   // Frontend-only callbacks
-  updateNodeData: (nodeId: string, data: Partial<AgentNodeData>) => void;
-  deleteNode: (nodeId: string) => void;
+  // updateNodeData and deleteNode are inherited from BaseNodeData
+}
+
+export interface ToolNodeData extends BaseNodeData {
+  name: string;
+  description: string;
+  tool_type: ToolType;
 }
 
 export interface ChatMessage {

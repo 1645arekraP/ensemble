@@ -115,7 +115,7 @@ class SupervisorPromptBuilder:
         tool_descriptions = []
         tool_names = []
         for t in available_tools:
-            tool_descriptions.append(f"- {t.name}: {t.description}")
+            tool_descriptions.append(f"- {t.name}: {t.effective_description}")
             tool_names.append(t.name)
         tool_list = "\n".join(tool_descriptions)
         tool_names_str = ", ".join(tool_names)
@@ -147,12 +147,15 @@ Decision Format (REQUIRED AT THE VERY END):
 <decision>
 next_agent: [exact_agent_or_tool_name | FINISH]
 is_complete: [true | false]
+task: [optional: specific input/task for the next agent/tool]
 reasoning: [brief explanation]
 </decision>
 
 **CRITICAL**: 
 - Always include the <decision> block at the very end
 - Use exact agent/tool names: {all_node_names_str}
+- **ACCURACY**: Copy email addresses, names, and IDs *exactly* from the user request. Do not alter them.
+- **CHECK CONTEXT**: If the 'LAST TOOL OUTPUT' indicates success for a task, DO NOT repeat it. Move to the next step or FINISH.
 """
         print("\n" + "="*80)
         print("SUPERVISOR PROMPT BUILT")
@@ -299,15 +302,35 @@ class AgentCompiler:
                     if available_tools:
                         tool_info = "\n\n**Available Tools You Can Reference:**\n"
                         for t in available_tools:
-                            tool_info += f"- {t.name}: {t.description}\n"
+                            tool_info += f"- {t.name}: {t.effective_description}\n"
                         system_prompt = system_prompt + tool_info
                     
                     first_human_message_content = hydrated_messages[0].content if hydrated_messages else ""
-                    full_human_prompt = f"{system_prompt}\n\nUser Request: {first_human_message_content}"
+                    
+                    # Inject current_task if it differs from the original request
+                    current_task_info = ""
+                    if state.current_task and state.current_task != first_human_message_content:
+                        current_task_info = f"\n\n**Current Task**: {state.current_task}"
+                    
+                    full_human_prompt = f"{system_prompt}\n\nUser Request: {first_human_message_content}{current_task_info}"
                     
                     # Get history and convert to Google format
                     history = hydrated_messages[1:] if len(hydrated_messages) > 1 else []
-                    converted_history = _convert_messages_to_google_format(history)
+                    
+                    # CLEAN HISTORY: Remove <decision> blocks to prevent confusion/hallucination
+                    cleaned_history = []
+                    for msg in history:
+                        content = msg.content if hasattr(msg, 'content') else str(msg)
+                        # Remove <decision>...</decision> blocks
+                        content = re.sub(r'<decision>.*?</decision>', '[Routing Decision Made]', content, flags=re.DOTALL | re.IGNORECASE)
+                        if isinstance(msg, HumanMessage):
+                            cleaned_history.append(HumanMessage(content=content))
+                        elif isinstance(msg, AIMessage):
+                            cleaned_history.append(AIMessage(content=content))
+                        else:
+                            cleaned_history.append(msg)
+
+                    converted_history = _convert_messages_to_google_format(cleaned_history)
                     
                     messages = [HumanMessage(content=full_human_prompt)] + converted_history
             
@@ -336,8 +359,16 @@ class AgentCompiler:
             
             try:
                 response = llm.invoke(messages)
-                final_messages = hydrated_messages + [response]
                 response_content = response.content
+                
+                # SANITIZATION: If this is NOT a supervisor, strip out any <decision> blocks
+                # to prevent confusing the actual supervisor in the next turn.
+                if agent.role != Agent.AgentRole.SUPERVISOR:
+                    response_content = re.sub(r'<decision>.*?</decision>', '', response_content, flags=re.DOTALL | re.IGNORECASE).strip()
+                    # Update the response object's content as well
+                    response.content = response_content
+
+                final_messages = hydrated_messages + [response]
 
             except Exception as e:
                 logger.error(f"❌ LLM call for agent '{agent.name}' FAILED: {e}")
@@ -448,7 +479,7 @@ class AgentCompiler:
             # Avoid duplicating if it's the same as the original request
             original_request = hydrated_messages[0].content if hydrated_messages and isinstance(hydrated_messages[0], HumanMessage) else ""
             if current_task != original_request:
-                context_parts.append(f"\n**Current Context / Tool Output**:\n{current_task}")
+                context_parts.append(f"\n**LAST TOOL OUTPUT**:\n{current_task}")
         
         return "\n".join(context_parts)
     
@@ -478,6 +509,10 @@ class AgentCompiler:
         new_state_dict['next_agent'] = supervisor_decision.get('next_agent')
         new_state_dict['is_complete'] = supervisor_decision.get('is_complete', False)
         new_state_dict['supervisor_decision'] = supervisor_decision
+        
+        # Update current_task if provided by supervisor
+        if supervisor_decision.get('task'):
+            new_state_dict['current_task'] = supervisor_decision.get('task')
         
         return AgentState(**new_state_dict)
     
@@ -520,5 +555,9 @@ class AgentCompiler:
         reason_match = re.search(r'reasoning:\s*(.+?)(?:\n|$)', decision_text, re.IGNORECASE | re.DOTALL)
         if reason_match:
             decision['reasoning'] = reason_match.group(1).strip()
+
+        task_match = re.search(r'task:\s*(.+?)(?:\n|$)', decision_text, re.IGNORECASE | re.DOTALL)
+        if task_match:
+            decision['task'] = task_match.group(1).strip()
         
         return decision

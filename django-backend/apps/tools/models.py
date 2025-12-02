@@ -51,6 +51,22 @@ class Tool(models.Model):
         ordering = ['name']
         unique_together = ('user', 'name')
 
+    @property
+    def effective_description(self):
+        if self.tool_type == self.ToolType.GMAIL:
+            return """A Gmail tool that can read your inbox, send emails, search for messages, and retrieve threads.
+To use this tool, output a JSON string with an 'action' field.
+Supported actions:
+- Send email: {"action": "send_email", "to": "email@example.com", "subject": "...", "body": "..."}
+- Search emails: {"action": "search_emails", "query": "from:sender@example.com"}
+- Get thread: {"action": "get_thread", "thread_id": "..."}
+- Read inbox: {"action": "read_inbox"}"""
+        elif self.tool_type in [self.ToolType.DISCORD_WEBHOOK, self.ToolType.SLACK_WEBHOOK, self.ToolType.TEAMS_WEBHOOK]:
+            return f"""A tool to send messages to {self.get_tool_type_display()}.
+To use this tool, output a JSON string with an 'action' and 'message' field.
+Example: {{"action": "send_message", "message": "Hello world"}}"""
+        return self.description
+
     def __str__(self):
         return f"{self.name} ({self.get_tool_type_display()})"
     

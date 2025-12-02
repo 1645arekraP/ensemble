@@ -1,9 +1,10 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, viewsets
 from apps.graph.models import Graph 
 from apps.graph.services.runner import GraphRunner 
-from .serializers import RunInputSerializer
+from .serializers import RunInputSerializer, ExecutionLogSerializer
+from .models import ExecutionLog
 
 class ProjectRunView(APIView):
     """
@@ -44,3 +45,16 @@ class ProjectRunView(APIView):
             print(f"Error running graph view: {e}")
             # This is for unexpected errors in the view itself
             return Response({"success": False, "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class ExecutionLogViewSet(viewsets.ModelViewSet):
+    serializer_class = ExecutionLogSerializer
+    http_method_names = ['get', 'delete', 'head', 'options']
+
+    def get_queryset(self):
+        return ExecutionLog.objects.filter(user=self.request.user).order_by('-started_at')
+
+    def filter_queryset(self, queryset):
+        graph_id = self.request.query_params.get('graph_id')
+        if graph_id:
+            return queryset.filter(graph_id=graph_id)
+        return queryset

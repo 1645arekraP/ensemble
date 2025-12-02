@@ -14,5 +14,5 @@ TOOL_REGISTRY = {
     "slack_webhook": webhooks.send_slack_message,
     "teams_webhook": webhooks.send_teams_message,
 
-    "gmail": gmail.read_gmail_inbox,
+    "gmail": gmail.gmail_tool,
 }

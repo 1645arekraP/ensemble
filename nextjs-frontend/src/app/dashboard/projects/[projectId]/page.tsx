@@ -2,7 +2,9 @@
 
 import { use, useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, History } from 'lucide-react';
+import Link from 'next/link';
+import { Button } from "@/components/ui/button";
 import {
   ApiAgentNode,
   ApiToolNode,
@@ -10,10 +12,12 @@ import {
   getTools,
   getProjectById,
   RunGraphResult,
-  generateGraphFromPrompt
+  generateGraphFromPrompt,
+  validateGraph
 } from '@/lib/api';
 import {
   type Project,
+  type ApiTool,
   GraphGenerateResponse,
   AgentNodeData,
   ToolNodeData,
@@ -155,7 +159,29 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
     setLogs([]); // Clear previous logs
     setFinalOutput(null); // Clear previous output
     handleSaveProject(undefined, {
-      onSuccess: (savedProject) => {
+      onSuccess: async (savedProject) => {
+
+        // 1. Validate credentials before running
+        try {
+          const validation = await validateGraph(projectId);
+          if (!validation.valid) {
+            // Show errors and abort
+            toast.error("Missing Credentials", {
+              description: validation.errors.join("\n"),
+              duration: 5000
+            });
+            // Also log to chat for visibility
+            setChatHistory(prev => [...prev, {
+              role: 'ai',
+              content: `⚠️ Cannot run workflow. Missing credentials:\n${validation.errors.map(e => `- ${e}`).join('\n')}`
+            }]);
+            return; // Abort execution
+          }
+        } catch (err) {
+          toast.error("Validation Failed", { description: "Could not validate graph credentials." });
+          return;
+        }
+
         toast.info("Project saved. Starting execution...");
 
         runGraphStream(
@@ -243,7 +269,14 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
 
   return (
     <div className="h-screen w-screen flex flex-col bg-neutral-50 overflow-hidden">
-      <SiteHeader name={`Canvas: ${project?.name || '...'}`} />
+      <SiteHeader name={`Canvas: ${project?.name || '...'}`}>
+        <Button variant="ghost" size="sm" asChild>
+          <Link href={`/dashboard/projects/${projectId}/history`}>
+            <History className="w-4 h-4 mr-2" />
+            History
+          </Link>
+        </Button>
+      </SiteHeader>
 
       {/* --- 2. Pass the isPending prop to the dialogs --- */}
       <AddToolNodeDialog
@@ -320,7 +353,7 @@ export default function ProjectCanvasPage({ params }: { params: AsyncProps<{ pro
 
         {/* Right Sidebar - Control Panel */}
         <div
-          className={`flex-shrink-0 transition-all duration-300 ease-in-out bg-white ${isControlPanelOpen ? 'w-96' : 'w-0'
+          className={`flex-shrink-0 transition-all duration-300 ease-in-out bg-white ${isExecuting ? 'w-2/3' : (isControlPanelOpen ? 'w-96' : 'w-0')
             }`}
         >
           <ControlPanel

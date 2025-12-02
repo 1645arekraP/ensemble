@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from ...agents.services.compiler import (
     AgentCompiler, AgentState, SupervisorPromptBuilder, _hydrate_messages
 )
+from django.utils import timezone
 from ..models import Graph
 from ...agents.models import Agent
 from ...executions.models import ExecutionLog, ExecutionStep
@@ -355,11 +356,13 @@ class GraphRunner:
         """
         execution_log = None
         if user:
+            from apps.executions.models import ExecutionLog
             execution_log = ExecutionLog.objects.create(
                 graph=graph,
                 user=user,
-                initial_input=initial_input,
-                context=context or {}
+                initial_input={"input": initial_input},
+                context=context or {},
+                status='running'
             )
 
         try:
@@ -390,76 +393,86 @@ class GraphRunner:
 
             # Stream the graph execution
             final_state = None
-            for step_output in compiled_graph.stream(state_dict):
-                # step_output is a dict where keys are node names and values are state updates
-                for node_name, state_update in step_output.items():
-                    
-                    # Check for tool outputs or agent responses
-                    if 'agent_outputs' in state_update:
-                        outputs = state_update['agent_outputs']
-                        for agent_name, output_data in outputs.items():
-                            yield json.dumps({
-                                "type": "agent_output",
-                                "node": agent_name,
-                                "output": output_data.get('response', '')
-                            }) + "\n"
-                            
-                            # Log step
-                            if execution_log:
-                                ExecutionStep.objects.create(
-                                    execution=execution_log,
-                                    agent_name=agent_name,
-                                    input_data=output_data.get('input', ''),
-                                    output_data=output_data.get('response', ''),
-                                    metadata=output_data
-                                )
-
-                    # Check for tool execution (custom logic in our wrapper prints to stdout, 
-                    # but we can capture state changes here if needed)
+            for chunk in compiled_graph.stream(state_dict):
+                
+                for node_name, state_update in chunk.items():
+                    # Check for tool execution
                     if 'current_task' in state_update:
-                         yield json.dumps({
-                            "type": "update",
+                         tool_output = state_update.get('current_task', '')
+                         event = {
+                            "type": "tool_output",
                             "node": node_name,
-                            "message": f"Node {node_name} updated state."
-                        }) + "\n"
+                            "output": str(tool_output)
+                        }
+                         if execution_log:
+                             execution_log.logs.append(event)
+                         yield json.dumps(event) + "\n"
                     
                     final_state = state_update # Keep track of the latest state
-
-            # Final success event
-            if execution_log:
-                execution_log.is_successful = True
-                execution_log.save()
+                    
+                    # Generic update event
+                    update_event = {
+                        "type": "update",
+                        "node": node_name,
+                        "message": f"Node {node_name} updated state."
+                    }
+                    if execution_log:
+                        execution_log.logs.append(update_event)
+                    yield json.dumps(update_event) + "\n"
+                    
+                    # Check for agent output (messages)
+                    if 'messages' in state_update:
+                        messages = state_update['messages']
+                        if messages:
+                            last_message = messages[-1]
+                            content = ""
+                            if hasattr(last_message, 'content'):
+                                content = last_message.content
+                            else:
+                                content = str(last_message)
+                                
+                            agent_event = {
+                                "type": "agent_output",
+                                "node": node_name,
+                                "output": content
+                            }
+                            if execution_log:
+                                execution_log.logs.append(agent_event)
+                            yield json.dumps(agent_event) + "\n"
 
             # Extract final output
-            final_output = ""
-            if final_state:
-                # final_state is a dict of the updated state from the last node
-                messages = final_state.get('messages', [])
-                if messages:
-                    last_msg = messages[-1]
-                    # Handle both dict and object (Pydantic) formats
-                    if isinstance(last_msg, dict):
-                        final_output = last_msg.get('content', '')
-                    elif hasattr(last_msg, 'content'):
-                        final_output = last_msg.content
-                    else:
-                        final_output = str(last_msg)
+            final_output_content = ""
+            if final_state and 'messages' in final_state:
+                 messages = final_state['messages']
+                 if messages:
+                     last_message = messages[-1]
+                     if hasattr(last_message, 'content'):
+                         final_output_content = last_message.content
+                     else:
+                         final_output_content = str(last_message)
+
+            if execution_log:
+                execution_log.status = 'completed'
+                execution_log.final_output = final_output_content
+                execution_log.completed_at = timezone.now()
+                execution_log.save()
 
             yield json.dumps({
                 "type": "complete",
-                "status": "success",
-                "message": "Graph execution completed.",
-                "final_output": str(final_output)
+                "message": "Graph execution completed successfully.",
+                "final_output": final_output_content
             }) + "\n"
-
+            
         except Exception as e:
-            logger.exception(f"Error streaming graph for user {user.id if user else 'Unknown'}: {e}")
+            error_msg = str(e)
             if execution_log:
-                execution_log.error_message = str(e)
-                execution_log.is_successful = False
+                execution_log.status = 'failed'
+                execution_log.error_message = error_msg
+                execution_log.completed_at = timezone.now()
+                execution_log.logs.append({"type": "error", "error": error_msg})
                 execution_log.save()
             
             yield json.dumps({
                 "type": "error",
-                "error": str(e)
+                "error": error_msg
             }) + "\n"
