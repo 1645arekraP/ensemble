@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 from datetime import timedelta
 from decouple import config
@@ -23,6 +24,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config('DJANGO_SECRET_KEY')
+
+GOOGLE_API_KEY = config('GOOGLE_API_KEY')
+
+CREDENTIALS_ENCRYPTION_KEY = config('CREDENTIALS_ENCRYPTION_KEY')
+
+GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID')
+GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -48,6 +57,11 @@ INSTALLED_APPS = [
     # Local apps
     'apps.core',
     'apps.users',
+    'apps.graph',
+    'apps.agents',
+    'apps.tools',
+    'apps.executions',
+    'apps.credentials',
 ]
 
 MIDDLEWARE = [
@@ -141,6 +155,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Custom user model
 AUTH_USER_MODEL = 'users.User'
+
+# OpenAI settings
+OPENAI_API_KEY = config('OPENAI_API_KEY', default=None)
+TAVILY_API_KEY = config('TAVILY_API_KEY', default=None)
 
 # Rest Framework settings
 REST_FRAMEWORK = {

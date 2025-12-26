@@ -1,6 +1,7 @@
 from django.db import models
 from ..tools.models import Tool
 from ..graph.models import Graph
+from django.conf import settings
 
 class Agent(models.Model):
     """Represents a single, configurable agent node within a project."""
@@ -15,10 +16,16 @@ class Agent(models.Model):
     class AgentRole(models.TextChoices):
         GENERAL = 'general', 'General'
         SUPERVISOR = 'supervisor', 'Supervisor'
-        # We can add more roles here
 
     # --- Core Fields ---
-    project = models.ForeignKey(Graph, on_delete=models.CASCADE, related_name='agents')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE,
+        related_name="agents",
+        null=True,  # Allows for global, "system" agents
+        blank=True
+    )
+    #project = models.ForeignKey(Graph, on_delete=models.CASCADE, related_name='agents')
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, help_text="A description of the agent's role and capabilities.")
     system_instruction_prompt = models.TextField()
@@ -38,9 +45,10 @@ class Agent(models.Model):
     
     # --- Associated Tools ---
     tools = models.ManyToManyField(Tool, blank=True, related_name='agents')
+    mcp = models.ManyToManyField('tools.mcp', blank=True, related_name='agents')
 
     class Meta:
-        unique_together = ('project', 'name')
+        unique_together = ('user', 'name')
 
     def __str__(self):
-        return f"{self.name} ({self.get_role_display()}) in '{self.project.name}'"
+        return f"{self.name} (Owner: {self.user or 'System'})"

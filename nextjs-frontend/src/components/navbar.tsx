@@ -2,7 +2,7 @@
 
 import { Button } from "./ui/button";
 import Link from "next/link";
-import { useAuth } from "@/context/auth-context"; // Import the custom hook
+import { useAuth } from "@/context/auth-context"; 
 
 export function Navbar() {
   const { isLoggedIn, logout } = useAuth(); // Use the hook to get the state and functions
